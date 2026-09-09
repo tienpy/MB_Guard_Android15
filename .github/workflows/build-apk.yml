@@ -1,0 +1,52 @@
+name: Build MB Guard Android 15 APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Restore signing key
+        shell: bash
+        run: |
+          mkdir -p signing
+          base64 -d signing/mbguard15.p12.b64 > signing/mbguard15.p12
+
+      - name: Build signed release APK
+        run: gradle --no-daemon assembleRelease
+
+      - name: Prepare APK
+        run: cp app/build/outputs/apk/release/app-release.apk MB_Guard_Android15_v1.5.0.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MB_Guard_Android15_v1.5.0
+          path: MB_Guard_Android15_v1.5.0.apk
+          if-no-files-found: error
