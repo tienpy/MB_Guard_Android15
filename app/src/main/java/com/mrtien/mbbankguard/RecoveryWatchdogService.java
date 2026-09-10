@@ -194,6 +194,7 @@ public class RecoveryWatchdogService extends Service {
         handler.removeCallbacksAndMessages(null);
         AccessibilityController.Result result =
                 AccessibilityController.restoreSelectedServices(this);
+        LauncherIconController.sync(this);
         storeArmedState(this, false, null);
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
                 .putString("last_restore_message", reason + " – " + result.message)
