@@ -1,4 +1,4 @@
 <resources>
-    <string name="app_name">Tien Shake Actions</string>
-    <string name="accessibility_description">Dùng cảm biến lắc để thực hiện thao tác nhanh do người dùng chọn.</string>
+    <string name="app_name">Tien Gesture Actions</string>
+    <string name="accessibility_description">Dùng gyroscope để nhận cử chỉ xoay điện thoại theo các trục và thực hiện thao tác nhanh do người dùng chọn.</string>
 </resources>
