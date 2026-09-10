@@ -97,6 +97,10 @@ public class MainActivity extends Activity {
         });
         root.addView(notif);
 
+        Button accessibility = button("BẬT TRỢ NĂNG HỖ TRỢ GHI ÂM");
+        accessibility.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
+        root.addView(accessibility);
+
         Button manual = button("GHI THỬ NGAY");
         manual.setOnClickListener(v -> sendServiceAction(MonitorRecorderService.ACTION_MANUAL_START, "TEST"));
         root.addView(manual);
