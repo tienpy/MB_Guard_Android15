@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Tien Call Recorder</string>
+    <string name="accessibility_description">Hỗ trợ Tien Call Recorder duy trì thu microphone trong lúc cuộc gọi đang hoạt động. Dịch vụ không đọc nội dung màn hình.</string>
 </resources>
