@@ -4,6 +4,8 @@ import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
 import android.content.Intent;
 import android.graphics.Color;
+import android.hardware.Sensor;
+import android.hardware.SensorManager;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -18,25 +20,51 @@ import android.widget.Spinner;
 import android.widget.TextView;
 import android.widget.Toast;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.List;
+import java.util.Locale;
 
 public class MainActivity extends Activity {
-    private static final String[] LABELS = {
-            "Không làm gì", "Back", "Chụp màn hình", "Home",
-            "Recent apps", "Mở thông báo", "Mở cài đặt nhanh"
-    };
-    private static final String[] VALUES = {
-            "NONE", "BACK", "SCREENSHOT", "HOME", "RECENTS", "NOTIFICATIONS", "QUICK_SETTINGS"
+    private static final String[] ACTION_LABELS = {
+            "Không làm gì",
+            "Back",
+            "Chụp màn hình",
+            "Home",
+            "Recent apps",
+            "Mở thông báo",
+            "Mở cài đặt nhanh"
     };
 
-    private Spinner singleSpinner;
-    private Spinner doubleSpinner;
-    private SeekBar sensitivity;
+    private static final String[] ACTION_VALUES = {
+            "NONE",
+            "BACK",
+            "SCREENSHOT",
+            "HOME",
+            "RECENTS",
+            "NOTIFICATIONS",
+            "QUICK_SETTINGS"
+    };
+
+    private TextView statusView;
     private TextView sensitivityLabel;
-    private CheckBox faceUpBack;
-    private SeekBar faceUpSensitivity;
-    private TextView faceUpSensitivityLabel;
-    private TextView status;
+    private TextView cooldownLabel;
+    private TextView lastGestureView;
+
+    private Spinner faceUpSpinner;
+    private Spinner faceDownSpinner;
+    private Spinner tiltLeftSpinner;
+    private Spinner tiltRightSpinner;
+    private Spinner twistLeftSpinner;
+    private Spinner twistRightSpinner;
+
+    private SeekBar sensitivityBar;
+    private SeekBar cooldownBar;
+
+    private CheckBox invertPitch;
+    private CheckBox invertRoll;
+    private CheckBox invertYaw;
+    private CheckBox vibrateFeedback;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -55,186 +83,362 @@ public class MainActivity extends Activity {
         ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
-        root.setPadding(dp(20), dp(22), dp(20), dp(28));
-        root.setBackgroundColor(Color.rgb(246,248,252));
+        root.setPadding(dp(20), dp(22), dp(20), dp(30));
+        root.setBackgroundColor(Color.rgb(246, 248, 252));
         scroll.addView(root);
 
-        TextView title = text("Tien Shake Actions", 28, true);
-        title.setTextColor(Color.rgb(0,105,92));
+        TextView title = text("Tien Gesture Actions", 28, true);
+        title.setTextColor(Color.rgb(0, 105, 92));
         root.addView(title);
 
         TextView intro = text(
-                "Lắc điện thoại để thao tác nhanh. Ứng dụng dùng Accessibility để thực hiện Back, "
-                        + "Home, Recent, chụp màn hình và mở bảng thông báo. Không đọc nội dung trên màn hình.",
-                15, false);
+                "Bản 2.0 làm lại từ đầu theo kiểu Micro Gesture: không dùng lắc gia tốc. "
+                        + "Ứng dụng chỉ nhận chuyển động XOAY điện thoại bằng gyroscope. "
+                        + "Mỗi cử chỉ phải vượt đủ góc và sau đó điện thoại phải đứng yên lại "
+                        + "thì mới cho phép cử chỉ kế tiếp.",
+                15,
+                false
+        );
         intro.setPadding(0, dp(8), 0, dp(12));
         root.addView(intro);
 
-        status = card(root, "TRẠNG THÁI");
+        statusView = card(root, "TRẠNG THÁI");
 
-        Button access = primary("BẬT TRỢ NĂNG CHO TIEN SHAKE ACTIONS");
-        access.setOnClickListener(v -> startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
-        root.addView(access);
+        Button accessibilityButton = primary("BẬT TRỢ NĂNG CHO TIEN GESTURE ACTIONS");
+        accessibilityButton.setOnClickListener(v ->
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+        );
+        root.addView(accessibilityButton);
 
-        addHeading(root, "Lắc 1 lần");
-        singleSpinner = spinner();
-        root.addView(singleSpinner);
+        addHeading(root, "GÁN CỬ CHỈ");
 
-        addHeading(root, "Lắc 2 lần");
-        doubleSpinner = spinner();
-        root.addView(doubleSpinner);
+        faceUpSpinner = addGestureRow(root, "Ngửa máy", "Mặc định: Back");
+        faceDownSpinner = addGestureRow(root, "Cúi máy", "");
+        tiltLeftSpinner = addGestureRow(root, "Nghiêng trái", "");
+        tiltRightSpinner = addGestureRow(root, "Nghiêng phải", "");
+        twistLeftSpinner = addGestureRow(root, "Xoay trái", "");
+        twistRightSpinner = addGestureRow(root, "Xoay phải", "");
 
-        addHeading(root, "NGỬA ĐIỆN THOẠI");
-        faceUpBack = new CheckBox(this);
-        faceUpBack.setText("Ngửa màn hình điện thoại lên = Back");
-        faceUpBack.setTextSize(16);
-        root.addView(faceUpBack);
-
-        TextView faceUpHelp = text(
-                "Khi đang cầm điện thoại đứng/nghiêng rồi xoay cổ tay để màn hình ngửa lên trời, "
-                        + "ứng dụng sẽ Back đúng 1 lần. Nếu điện thoại nằm ngửa sẵn trên bàn thì không lặp lại.",
-                14, false);
-        faceUpHelp.setTextColor(Color.DKGRAY);
-        faceUpHelp.setPadding(dp(4), 0, dp(4), dp(6));
-        root.addView(faceUpHelp);
-
-        faceUpSensitivityLabel = text("", 15, false);
-        root.addView(faceUpSensitivityLabel);
-        faceUpSensitivity = new SeekBar(this);
-        faceUpSensitivity.setMax(100);
-        faceUpSensitivity.setMin(1);
-        faceUpSensitivity.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                faceUpSensitivityLabel.setText("Độ nhạy ngửa: " + progress + "/100  (cao hơn = dễ nhận ngửa hơn)");
-            }
-            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
-            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
-        });
-        root.addView(faceUpSensitivity);
-
-        addHeading(root, "ĐỘ NHẠY LẮC");
+        addHeading(root, "ĐỘ NHẠY XOAY");
         sensitivityLabel = text("", 15, false);
         root.addView(sensitivityLabel);
-        sensitivity = new SeekBar(this);
-        sensitivity.setMax(100);
-        sensitivity.setMin(1);
-        sensitivity.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
-            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                sensitivityLabel.setText("Độ nhạy lắc: " + progress + "/100  (cao hơn = dễ kích hoạt hơn)");
+
+        sensitivityBar = new SeekBar(this);
+        sensitivityBar.setMin(1);
+        sensitivityBar.setMax(100);
+        sensitivityBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                sensitivityLabel.setText(
+                        "Độ nhạy: " + progress + "/100"
+                                + "  •  cao hơn = cần xoay ít góc hơn"
+                );
             }
+
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
         });
-        root.addView(sensitivity);
+        root.addView(sensitivityBar);
 
-        Button save = primary("LƯU CÀI ĐẶT");
-        save.setOnClickListener(v -> saveSettings());
-        root.addView(save);
+        addHeading(root, "CHỐNG KÍCH HOẠT LIÊN TỤC");
+        cooldownLabel = text("", 15, false);
+        root.addView(cooldownLabel);
 
-        TextView note = text(
-                "Gợi ý ban đầu: Ngửa điện thoại = Back, lắc 1 lần = Back, lắc 2 lần = Chụp màn hình, độ nhạy lắc 60. "
-                        + "Nếu hay kích hoạt nhầm khi đi xe hoặc cầm điện thoại, giảm độ nhạy xuống 40–50.",
-                14,false);
-        note.setTextColor(Color.DKGRAY);
-        note.setPadding(0, dp(16), 0, 0);
-        root.addView(note);
+        cooldownBar = new SeekBar(this);
+        cooldownBar.setMin(3);
+        cooldownBar.setMax(15);
+        cooldownBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int ms = progress * 100;
+                cooldownLabel.setText("Thời gian nghỉ sau mỗi cử chỉ: " + ms + " ms");
+            }
+
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        root.addView(cooldownBar);
+
+        addHeading(root, "ĐẢO CHIỀU NẾU MÁY NHẬN NGƯỢC");
+        invertPitch = checkbox("Đảo Ngửa ↔ Cúi");
+        invertRoll = checkbox("Đảo Nghiêng trái ↔ phải");
+        invertYaw = checkbox("Đảo Xoay trái ↔ phải");
+        root.addView(invertPitch);
+        root.addView(invertRoll);
+        root.addView(invertYaw);
+
+        vibrateFeedback = checkbox("Rung nhẹ khi cử chỉ đã được nhận");
+        root.addView(vibrateFeedback);
+
+        Button saveButton = primary("LƯU CÀI ĐẶT");
+        saveButton.setOnClickListener(v -> saveSettings());
+        root.addView(saveButton);
+
+        lastGestureView = card(root, "CỬ CHỈ GẦN NHẤT");
+
+        Button refreshButton = button("CẬP NHẬT CỬ CHỈ GẦN NHẤT");
+        refreshButton.setOnClickListener(v -> refreshStatus());
+        root.addView(refreshButton);
+
+        TextView guide = text(
+                "Cách test tốt nhất:\n"
+                        + "1. Để các mục khác = Không làm gì.\n"
+                        + "2. Chỉ để Ngửa máy = Back.\n"
+                        + "3. Giữ điện thoại yên khoảng nửa giây.\n"
+                        + "4. Ngửa cổ tay một lần rõ ràng khoảng 20–30°.\n"
+                        + "5. Giữ yên lại rồi mới thử lần tiếp theo.\n\n"
+                        + "Nếu Ngửa lại bị nhận thành Cúi, chỉ cần bật “Đảo Ngửa ↔ Cúi”.",
+                14,
+                false
+        );
+        guide.setTextColor(Color.DKGRAY);
+        guide.setPadding(0, dp(16), 0, 0);
+        root.addView(guide);
+
         return scroll;
     }
 
-    private Spinner spinner() {
-        Spinner s = new Spinner(this);
-        ArrayAdapter<String> a = new ArrayAdapter<>(this, android.R.layout.simple_spinner_dropdown_item, LABELS);
-        s.setAdapter(a);
-        return s;
+    private Spinner addGestureRow(LinearLayout root, String name, String note) {
+        TextView title = text(name, 16, true);
+        title.setPadding(0, dp(8), 0, 0);
+        root.addView(title);
+
+        if (!note.isEmpty()) {
+            TextView n = text(note, 13, false);
+            n.setTextColor(Color.DKGRAY);
+            root.addView(n);
+        }
+
+        Spinner spinner = actionSpinner();
+        root.addView(spinner);
+        return spinner;
+    }
+
+    private Spinner actionSpinner() {
+        Spinner spinner = new Spinner(this);
+        ArrayAdapter<String> adapter = new ArrayAdapter<>(
+                this,
+                android.R.layout.simple_spinner_dropdown_item,
+                ACTION_LABELS
+        );
+        spinner.setAdapter(adapter);
+        return spinner;
+    }
+
+    private CheckBox checkbox(String label) {
+        CheckBox box = new CheckBox(this);
+        box.setText(label);
+        box.setTextSize(15);
+        return box;
     }
 
     private void loadSettings() {
-        String single = getSharedPreferences("prefs", MODE_PRIVATE).getString("single_action", "BACK");
-        String dbl = getSharedPreferences("prefs", MODE_PRIVATE).getString("double_action", "SCREENSHOT");
-        int sens = getSharedPreferences("prefs", MODE_PRIVATE).getInt("sensitivity", 60);
-        boolean faceUp = getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("face_up_back", true);
-        int faceSens = getSharedPreferences("prefs", MODE_PRIVATE).getInt("face_up_sensitivity", 65);
-        singleSpinner.setSelection(indexOf(single));
-        doubleSpinner.setSelection(indexOf(dbl));
-        faceUpBack.setChecked(faceUp);
-        faceUpSensitivity.setProgress(faceSens);
-        faceUpSensitivityLabel.setText("Độ nhạy ngửa: " + faceSens + "/100  (cao hơn = dễ nhận ngửa hơn)");
-        sensitivity.setProgress(sens);
-        sensitivityLabel.setText("Độ nhạy lắc: " + sens + "/100  (cao hơn = dễ kích hoạt hơn)");
+        faceUpSpinner.setSelection(indexOfAction(
+                getSharedPreferences("prefs", MODE_PRIVATE)
+                        .getString("gesture_face_up", "BACK")
+        ));
+        faceDownSpinner.setSelection(indexOfAction(
+                getSharedPreferences("prefs", MODE_PRIVATE)
+                        .getString("gesture_face_down", "NONE")
+        ));
+        tiltLeftSpinner.setSelection(indexOfAction(
+                getSharedPreferences("prefs", MODE_PRIVATE)
+                        .getString("gesture_tilt_left", "NONE")
+        ));
+        tiltRightSpinner.setSelection(indexOfAction(
+                getSharedPreferences("prefs", MODE_PRIVATE)
+                        .getString("gesture_tilt_right", "NONE")
+        ));
+        twistLeftSpinner.setSelection(indexOfAction(
+                getSharedPreferences("prefs", MODE_PRIVATE)
+                        .getString("gesture_twist_left", "NONE")
+        ));
+        twistRightSpinner.setSelection(indexOfAction(
+                getSharedPreferences("prefs", MODE_PRIVATE)
+                        .getString("gesture_twist_right", "NONE")
+        ));
+
+        int sensitivity = getSharedPreferences("prefs", MODE_PRIVATE)
+                .getInt("gyro_sensitivity", 60);
+        sensitivityBar.setProgress(sensitivity);
+        sensitivityLabel.setText(
+                "Độ nhạy: " + sensitivity + "/100"
+                        + "  •  cao hơn = cần xoay ít góc hơn"
+        );
+
+        int cooldown = getSharedPreferences("prefs", MODE_PRIVATE)
+                .getInt("cooldown_ms", 650);
+        int step = Math.max(3, Math.min(15, Math.round(cooldown / 100f)));
+        cooldownBar.setProgress(step);
+        cooldownLabel.setText(
+                "Thời gian nghỉ sau mỗi cử chỉ: " + (step * 100) + " ms"
+        );
+
+        invertPitch.setChecked(getSharedPreferences("prefs", MODE_PRIVATE)
+                .getBoolean("invert_pitch", false));
+        invertRoll.setChecked(getSharedPreferences("prefs", MODE_PRIVATE)
+                .getBoolean("invert_roll", false));
+        invertYaw.setChecked(getSharedPreferences("prefs", MODE_PRIVATE)
+                .getBoolean("invert_yaw", false));
+        vibrateFeedback.setChecked(getSharedPreferences("prefs", MODE_PRIVATE)
+                .getBoolean("vibrate_feedback", true));
     }
 
     private void saveSettings() {
         getSharedPreferences("prefs", MODE_PRIVATE).edit()
-                .putString("single_action", VALUES[singleSpinner.getSelectedItemPosition()])
-                .putString("double_action", VALUES[doubleSpinner.getSelectedItemPosition()])
-                .putBoolean("face_up_back", faceUpBack.isChecked())
-                .putInt("face_up_sensitivity", faceUpSensitivity.getProgress())
-                .putInt("sensitivity", sensitivity.getProgress())
+                .putString("gesture_face_up", selectedAction(faceUpSpinner))
+                .putString("gesture_face_down", selectedAction(faceDownSpinner))
+                .putString("gesture_tilt_left", selectedAction(tiltLeftSpinner))
+                .putString("gesture_tilt_right", selectedAction(tiltRightSpinner))
+                .putString("gesture_twist_left", selectedAction(twistLeftSpinner))
+                .putString("gesture_twist_right", selectedAction(twistRightSpinner))
+                .putInt("gyro_sensitivity", sensitivityBar.getProgress())
+                .putInt("cooldown_ms", cooldownBar.getProgress() * 100)
+                .putBoolean("invert_pitch", invertPitch.isChecked())
+                .putBoolean("invert_roll", invertRoll.isChecked())
+                .putBoolean("invert_yaw", invertYaw.isChecked())
+                .putBoolean("vibrate_feedback", vibrateFeedback.isChecked())
                 .apply();
-        Toast.makeText(this, "Đã lưu.", Toast.LENGTH_SHORT).show();
+
+        Toast.makeText(this, "Đã lưu cài đặt cử chỉ.", Toast.LENGTH_SHORT).show();
+        refreshStatus();
     }
 
-    private int indexOf(String value) {
-        for (int i=0;i<VALUES.length;i++) if (VALUES[i].equals(value)) return i;
+    private String selectedAction(Spinner spinner) {
+        int index = spinner.getSelectedItemPosition();
+        if (index < 0 || index >= ACTION_VALUES.length) {
+            return "NONE";
+        }
+        return ACTION_VALUES[index];
+    }
+
+    private int indexOfAction(String value) {
+        for (int i = 0; i < ACTION_VALUES.length; i++) {
+            if (ACTION_VALUES[i].equals(value)) {
+                return i;
+            }
+        }
         return 0;
     }
 
     private void refreshStatus() {
-        boolean on = isServiceEnabled();
-        boolean faceUp = getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("face_up_back", true);
-        status.setText("Trợ năng Tien Shake Actions: " + (on ? "ĐANG BẬT" : "ĐANG TẮT")
-                + "\nCảm biến lắc: " + (on ? "ĐANG HOẠT ĐỘNG" : "CHƯA HOẠT ĐỘNG")
-                + "\nNgửa điện thoại = Back: " + (faceUp ? "BẬT" : "TẮT"));
-        status.setTextColor(on ? Color.rgb(20,110,45) : Color.rgb(160,55,35));
+        boolean serviceOn = isAccessibilityServiceEnabled();
+
+        SensorManager sensorManager =
+                (SensorManager) getSystemService(SENSOR_SERVICE);
+        boolean gyroAvailable = sensorManager != null
+                && sensorManager.getDefaultSensor(Sensor.TYPE_GYROSCOPE) != null;
+
+        statusView.setText(
+                "Trợ năng: " + (serviceOn ? "ĐANG BẬT" : "ĐANG TẮT")
+                        + "\nGyroscope: " + (gyroAvailable ? "CÓ" : "KHÔNG CÓ")
+                        + "\nChế độ nhận diện: XOAY THEO TRỤC X / Y / Z"
+        );
+
+        statusView.setTextColor(
+                serviceOn && gyroAvailable
+                        ? Color.rgb(20, 110, 45)
+                        : Color.rgb(160, 55, 35)
+        );
+
+        String lastGesture = getSharedPreferences("prefs", MODE_PRIVATE)
+                .getString("last_gesture", "Chưa nhận cử chỉ nào");
+        long lastTime = getSharedPreferences("prefs", MODE_PRIVATE)
+                .getLong("last_gesture_time", 0L);
+
+        String timeText = "";
+        if (lastTime > 0L) {
+            timeText = new SimpleDateFormat(
+                    "HH:mm:ss dd/MM/yyyy",
+                    Locale.getDefault()
+            ).format(new Date(lastTime));
+        }
+
+        lastGestureView.setText(
+                lastGesture + (timeText.isEmpty() ? "" : "\n" + timeText)
+        );
     }
 
-    private boolean isServiceEnabled() {
-        AccessibilityManager am = (AccessibilityManager) getSystemService(ACCESSIBILITY_SERVICE);
-        if (am == null) return false;
-        List<AccessibilityServiceInfo> list = am.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
-        String mine = getPackageName();
-        for (AccessibilityServiceInfo info : list) {
-            if (info.getResolveInfo() != null && info.getResolveInfo().serviceInfo != null
-                    && mine.equals(info.getResolveInfo().serviceInfo.packageName)) return true;
+    private boolean isAccessibilityServiceEnabled() {
+        AccessibilityManager manager =
+                (AccessibilityManager) getSystemService(ACCESSIBILITY_SERVICE);
+        if (manager == null) {
+            return false;
+        }
+
+        List<AccessibilityServiceInfo> services =
+                manager.getEnabledAccessibilityServiceList(
+                        AccessibilityServiceInfo.FEEDBACK_ALL_MASK
+                );
+
+        for (AccessibilityServiceInfo info : services) {
+            if (info.getResolveInfo() != null
+                    && info.getResolveInfo().serviceInfo != null
+                    && getPackageName().equals(
+                    info.getResolveInfo().serviceInfo.packageName
+            )) {
+                return true;
+            }
         }
         return false;
     }
 
     private TextView card(LinearLayout root, String heading) {
         addHeading(root, heading);
-        TextView t = text("",15,false);
-        t.setBackgroundColor(Color.WHITE);
-        t.setPadding(dp(14),dp(12),dp(14),dp(12));
-        root.addView(t);
-        return t;
+        TextView value = text("", 15, false);
+        value.setBackgroundColor(Color.WHITE);
+        value.setPadding(dp(14), dp(12), dp(14), dp(12));
+        root.addView(value);
+        return value;
     }
 
-    private void addHeading(LinearLayout root, String h) {
-        TextView t=text(h,17,true);
-        t.setPadding(0,dp(12),0,dp(5));
-        root.addView(t);
+    private void addHeading(LinearLayout root, String heading) {
+        TextView view = text(heading, 17, true);
+        view.setPadding(0, dp(14), 0, dp(5));
+        root.addView(view);
+    }
+
+    private Button button(String label) {
+        Button button = new Button(this);
+        button.setText(label);
+        button.setTextSize(15);
+        button.setAllCaps(false);
+        button.setGravity(Gravity.CENTER);
+
+        LinearLayout.LayoutParams params =
+                new LinearLayout.LayoutParams(
+                        LinearLayout.LayoutParams.MATCH_PARENT,
+                        dp(52)
+                );
+        params.topMargin = dp(7);
+        button.setLayoutParams(params);
+        return button;
     }
 
     private Button primary(String label) {
-        Button b = new Button(this);
-        b.setText(label);
-        b.setAllCaps(false);
-        b.setTextSize(15);
-        b.setTextColor(Color.WHITE);
-        b.setBackgroundColor(Color.rgb(0,137,123));
-        b.setGravity(Gravity.CENTER);
-        LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(-1,dp(52));
-        p.topMargin=dp(7);
-        b.setLayoutParams(p);
-        return b;
+        Button button = button(label);
+        button.setTextColor(Color.WHITE);
+        button.setBackgroundColor(Color.rgb(0, 137, 123));
+        return button;
     }
 
-    private TextView text(String s,int sp,boolean bold) {
-        TextView t=new TextView(this);
-        t.setText(s); t.setTextSize(sp); t.setTextColor(Color.rgb(25,25,25));
-        if (bold) t.setTypeface(t.getTypeface(), android.graphics.Typeface.BOLD);
-        return t;
+    private TextView text(String value, int sp, boolean bold) {
+        TextView view = new TextView(this);
+        view.setText(value);
+        view.setTextSize(sp);
+        view.setTextColor(Color.rgb(25, 25, 25));
+        if (bold) {
+            view.setTypeface(
+                    view.getTypeface(),
+                    android.graphics.Typeface.BOLD
+            );
+        }
+        return view;
     }
 
-    private int dp(int v) { return Math.round(v*getResources().getDisplayMetrics().density); }
+    private int dp(int value) {
+        return Math.round(
+                value * getResources().getDisplayMetrics().density
+        );
+    }
 }
