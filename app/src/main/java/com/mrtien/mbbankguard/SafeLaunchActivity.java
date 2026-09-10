@@ -96,6 +96,8 @@ public class SafeLaunchActivity extends Activity {
             return;
         }
 
+        LauncherIconController.sync(this);
+
         if (launchIntent != null) {
             openTarget(launchIntent);
         } else {
