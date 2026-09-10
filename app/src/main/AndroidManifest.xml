@@ -18,6 +18,7 @@
 
     <queries>
         <package android:name="com.mbmobile" />
+        <package android:name="com.mrtien.mbbankguard" />
         <intent>
             <action android:name="android.accessibilityservice.AccessibilityService" />
         </intent>
@@ -29,44 +30,38 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_launcher"
-        android:label="@string/app_name"
-        android:roundIcon="@drawable/ic_launcher"
+        android:icon="@drawable/ic_toggle_accessibility"
+        android:label="@string/toggle_accessibility_name"
+        android:roundIcon="@drawable/ic_toggle_accessibility"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
 
+        <!-- Màn hình cài đặt vẫn tồn tại nhưng KHÔNG tạo icon riêng ngoài màn hình. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:label="@string/app_name">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:label="@string/settings_title" />
 
         <activity
             android:name=".LocalAdbPermissionActivity"
             android:exported="false"
             android:label="Cấp quyền trên điện thoại" />
 
+        <!-- Giữ chức năng MỞ APP AN TOÀN để tương thích dữ liệu cũ,
+             nhưng KHÔNG còn là launcher icon. -->
         <activity
             android:name=".SafeLaunchActivity"
             android:excludeFromRecents="true"
-            android:exported="true"
+            android:exported="false"
             android:finishOnTaskLaunch="true"
             android:label="@string/safe_launcher_name"
             android:launchMode="singleTask"
             android:noHistory="true"
             android:taskAffinity="com.mrtien.mbbankguard.safe"
-            android:theme="@style/TransparentLaunchTheme">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
+            android:theme="@style/TransparentLaunchTheme" />
 
+        <!-- DUY NHẤT activity này có MAIN/LAUNCHER: ngoài màn hình chỉ có 1 icon. -->
         <activity
             android:name=".ToggleAccessibilityActivity"
             android:excludeFromRecents="true"
@@ -83,6 +78,11 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
+            <!-- Nhấn giữ icon -> CÀI ĐẶT MB GUARD, không tạo thêm icon ngoài màn hình. -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
 
         <service
