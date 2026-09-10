@@ -1,0 +1,29 @@
+name: Fetch Open Source CallVault APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/fetch-callvault-official.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download official CallVault v2.2.0 APK
+        run: |
+          curl -fL --retry 3 --retry-delay 2 \
+            https://github.com/madkongo/CallVault/releases/download/v2.2.0/CallVault.apk \
+            -o Tien_Call_Recorder_Pro_BASE_CallVault_v2.2.0.apk
+          echo "01d99fc3648aee53f694f34f379c946bcbcb63235d535098e776385240758a6b  Tien_Call_Recorder_Pro_BASE_CallVault_v2.2.0.apk" | sha256sum -c -
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tien_Call_Recorder_Pro_BASE_CallVault_v2.2.0
+          path: Tien_Call_Recorder_Pro_BASE_CallVault_v2.2.0.apk
+          if-no-files-found: error
