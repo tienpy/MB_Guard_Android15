@@ -42,11 +42,11 @@ jobs:
         run: gradle --no-daemon assembleRelease
 
       - name: Prepare APK
-        run: cp app/build/outputs/apk/release/app-release.apk MB_Guard_Android15_v1.5.2.apk
+        run: cp app/build/outputs/apk/release/app-release.apk MB_Guard_Android15_v1.5.3.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: MB_Guard_Android15_v1.5.2
-          path: MB_Guard_Android15_v1.5.2.apk
+          name: MB_Guard_Android15_v1.5.3
+          path: MB_Guard_Android15_v1.5.3.apk
           if-no-files-found: error
