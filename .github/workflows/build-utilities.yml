@@ -48,14 +48,14 @@ jobs:
 
       - name: Prepare APK files
         run: |
-          cp callrecorder/build/outputs/apk/release/callrecorder-release.apk Tien_Call_Recorder_v1.2.0.apk
+          cp callrecorder/build/outputs/apk/release/callrecorder-release.apk Tien_Call_Recorder_v1.3.0.apk
           cp shakeactions/build/outputs/apk/release/shakeactions-release.apk Tien_Gesture_Actions_v2.0.1.apk
 
       - name: Upload Call Recorder
         uses: actions/upload-artifact@v4
         with:
-          name: Tien_Call_Recorder_v1.2.0
-          path: Tien_Call_Recorder_v1.2.0.apk
+          name: Tien_Call_Recorder_v1.3.0
+          path: Tien_Call_Recorder_v1.3.0.apk
           if-no-files-found: error
 
       - name: Upload Shake Actions
