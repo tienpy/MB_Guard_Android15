@@ -145,10 +145,22 @@ public final class AccessibilityController {
                 .apply();
     }
 
+    public static int getEnabledSelectedCount(Context context) {
+        Set<ComponentName> selected = getSelectedComponents(context);
+        Set<ComponentName> enabled = readEnabledComponents(context);
+        int count = 0;
+        for (ComponentName component : selected) {
+            if (enabled.contains(component)) {
+                count++;
+            }
+        }
+        return count;
+    }
+
     public static synchronized Result disableSelectedServices(Context context) {
         if (!hasWriteSecureSettings(context)) {
             return new Result(false,
-                    "Chưa có quyền WRITE_SECURE_SETTINGS. Hãy chạy lệnh ADB một lần.",
+                    "Chưa có quyền WRITE_SECURE_SETTINGS. Hãy bấm CẤP QUYỀN TRÊN ĐIỆN THOẠI.",
                     0, 0);
         }
 
@@ -173,6 +185,17 @@ public final class AccessibilityController {
         ));
         LinkedHashSet<ComponentName> restoreSnapshot = new LinkedHashSet<>(enabled);
         restoreSnapshot.retainAll(targets);
+
+        if (restoreSnapshot.isEmpty()) {
+            preferences(context).edit()
+                    .putBoolean(KEY_GUARD_ACTIVE, false)
+                    .remove(KEY_RESTORE)
+                    .apply();
+            return new Result(false,
+                    "Các Trợ năng đã chọn hiện đang OFF, nên không có gì để tắt. "
+                            + "Hãy bấm BẬT/TẮT TRỢ NĂNG để bật chúng trước rồi thử MỞ APP AN TOÀN.",
+                    targets.size(), 0);
+        }
 
         int before = enabled.size();
         enabled.removeAll(targets);
@@ -252,7 +275,7 @@ public final class AccessibilityController {
     public static synchronized Result toggleSelectedServicesManually(Context context) {
         if (!hasWriteSecureSettings(context)) {
             return new Result(false,
-                    "Chưa có quyền WRITE_SECURE_SETTINGS. Hãy chạy lệnh ADB một lần.",
+                    "Chưa có quyền WRITE_SECURE_SETTINGS. Hãy bấm CẤP QUYỀN TRÊN ĐIỆN THOẠI.",
                     0, 0);
         }
 
