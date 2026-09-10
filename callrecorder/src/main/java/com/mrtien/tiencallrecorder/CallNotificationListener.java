@@ -15,73 +15,129 @@ public class CallNotificationListener extends NotificationListenerService {
 
     @Override
     public void onNotificationPosted(StatusBarNotification sbn) {
-        if (sbn == null || !isSupportedPackage(sbn.getPackageName())) return;
-        Notification n = sbn.getNotification();
-        if (n == null) return;
+        if (sbn == null || getPackageName().equals(sbn.getPackageName())) {
+            return;
+        }
 
-        String title = text(n.extras.getCharSequence(Notification.EXTRA_TITLE));
-        String body = text(n.extras.getCharSequence(Notification.EXTRA_TEXT));
-        String big = text(n.extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
+        Notification notification = sbn.getNotification();
+        if (notification == null) {
+            return;
+        }
+
+        String title = text(notification.extras.getCharSequence(Notification.EXTRA_TITLE));
+        String body = text(notification.extras.getCharSequence(Notification.EXTRA_TEXT));
+        String big = text(notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT));
         String combined = (title + " " + body + " " + big).toLowerCase(Locale.ROOT);
 
-        if (looksLikeCall(combined, n)) {
+        boolean categoryCall = Notification.CATEGORY_CALL.equals(notification.category);
+        boolean knownVoip = isKnownVoipPackage(sbn.getPackageName());
+
+        if (categoryCall || (knownVoip && looksLikeCall(combined, notification))) {
             activeCallNotifications.add(sbn.getKey());
-            signal(MonitorRecorderService.ACTION_VOIP_START, sourceForPackage(sbn.getPackageName()));
+            getSharedPreferences("prefs", MODE_PRIVATE)
+                    .edit()
+                    .putString(
+                            "last_event",
+                            "Thông báo cuộc gọi: " + sourceForPackage(sbn.getPackageName())
+                    )
+                    .putLong("last_event_time", System.currentTimeMillis())
+                    .apply();
+
+            signal(
+                    MonitorRecorderService.ACTION_VOIP_START,
+                    sourceForPackage(sbn.getPackageName())
+            );
         }
     }
 
     @Override
     public void onNotificationRemoved(StatusBarNotification sbn) {
-        if (sbn == null) return;
-        if (activeCallNotifications.remove(sbn.getKey()) && activeCallNotifications.isEmpty()) {
+        if (sbn == null) {
+            return;
+        }
+
+        if (activeCallNotifications.remove(sbn.getKey())
+                && activeCallNotifications.isEmpty()) {
             signal(MonitorRecorderService.ACTION_VOIP_STOP, "");
         }
     }
 
     private void signal(String action, String source) {
-        if (!getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("enabled", false)) return;
-        Intent i = new Intent(this, MonitorRecorderService.class).setAction(action);
-        i.putExtra("source", source);
+        if (!getSharedPreferences("prefs", MODE_PRIVATE)
+                .getBoolean("enabled", false)) {
+            return;
+        }
+
+        Intent intent = new Intent(this, MonitorRecorderService.class)
+                .setAction(action);
+        intent.putExtra("source", source);
+
         try {
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(i); else startService(i);
-        } catch (Throwable ignored) {
+            if (Build.VERSION.SDK_INT >= 26) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+        } catch (Throwable t) {
+            getSharedPreferences("prefs", MODE_PRIVATE)
+                    .edit()
+                    .putString(
+                            "last_error",
+                            "Không gửi được sự kiện cuộc gọi từ thông báo: "
+                                    + t.getClass().getSimpleName()
+                    )
+                    .putLong("last_error_time", System.currentTimeMillis())
+                    .apply();
         }
     }
 
-    private boolean isSupportedPackage(String p) {
-        return "com.zing.zalo".equals(p)
-                || "com.facebook.orca".equals(p)
-                || "com.facebook.katana".equals(p)
-                || "com.whatsapp".equals(p);
+    private boolean isKnownVoipPackage(String packageName) {
+        return "com.zing.zalo".equals(packageName)
+                || "com.facebook.orca".equals(packageName)
+                || "com.facebook.katana".equals(packageName)
+                || "com.whatsapp".equals(packageName)
+                || "org.telegram.messenger".equals(packageName)
+                || "com.viber.voip".equals(packageName);
     }
 
-    private String sourceForPackage(String p) {
-        if ("com.zing.zalo".equals(p)) return "ZALO";
-        if ("com.facebook.orca".equals(p)) return "MESSENGER";
-        if ("com.facebook.katana".equals(p)) return "FACEBOOK";
-        if ("com.whatsapp".equals(p)) return "WHATSAPP";
-        return "VOIP";
+    private String sourceForPackage(String packageName) {
+        if ("com.zing.zalo".equals(packageName)) return "ZALO";
+        if ("com.facebook.orca".equals(packageName)) return "MESSENGER";
+        if ("com.facebook.katana".equals(packageName)) return "FACEBOOK";
+        if ("com.whatsapp".equals(packageName)) return "WHATSAPP";
+        if ("org.telegram.messenger".equals(packageName)) return "TELEGRAM";
+        if ("com.viber.voip".equals(packageName)) return "VIBER";
+        return "APP_CALL";
     }
 
-    private boolean looksLikeCall(String text, Notification n) {
-        if (Notification.CATEGORY_CALL.equals(n.category)) return true;
-        if ((n.flags & Notification.FLAG_ONGOING_EVENT) != 0 && containsCallWord(text)) return true;
-        return containsCallWord(text);
+    private boolean looksLikeCall(String value, Notification notification) {
+        if (Notification.CATEGORY_CALL.equals(notification.category)) {
+            return true;
+        }
+        if ((notification.flags & Notification.FLAG_ONGOING_EVENT) != 0
+                && containsCallWord(value)) {
+            return true;
+        }
+        return containsCallWord(value);
     }
 
-    private boolean containsCallWord(String s) {
-        return s.contains("cuộc gọi")
-                || s.contains("đang gọi")
-                || s.contains("gọi đến")
-                || s.contains("gọi đi")
-                || s.contains("incoming call")
-                || s.contains("ongoing call")
-                || s.contains("voice call")
-                || s.contains("video call")
-                || s.contains("calling");
+    private boolean containsCallWord(String value) {
+        return value.contains("cuộc gọi")
+                || value.contains("đang gọi")
+                || value.contains("gọi đến")
+                || value.contains("gọi đi")
+                || value.contains("đang trong cuộc gọi")
+                || value.contains("cuộc gọi thoại")
+                || value.contains("cuộc gọi video")
+                || value.contains("incoming call")
+                || value.contains("ongoing call")
+                || value.contains("voice call")
+                || value.contains("video call")
+                || value.contains("calling")
+                || value.contains("call in progress");
     }
 
-    private String text(CharSequence c) {
-        return c == null ? "" : c.toString();
+    private String text(CharSequence value) {
+        return value == null ? "" : value.toString();
     }
 }
