@@ -10,6 +10,7 @@ import android.view.Gravity;
 import android.view.accessibility.AccessibilityManager;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.SeekBar;
@@ -32,6 +33,9 @@ public class MainActivity extends Activity {
     private Spinner doubleSpinner;
     private SeekBar sensitivity;
     private TextView sensitivityLabel;
+    private CheckBox faceUpBack;
+    private SeekBar faceUpSensitivity;
+    private TextView faceUpSensitivityLabel;
     private TextView status;
 
     @Override
@@ -80,7 +84,35 @@ public class MainActivity extends Activity {
         doubleSpinner = spinner();
         root.addView(doubleSpinner);
 
-        addHeading(root, "Độ nhạy");
+        addHeading(root, "NGỬA ĐIỆN THOẠI");
+        faceUpBack = new CheckBox(this);
+        faceUpBack.setText("Ngửa màn hình điện thoại lên = Back");
+        faceUpBack.setTextSize(16);
+        root.addView(faceUpBack);
+
+        TextView faceUpHelp = text(
+                "Khi đang cầm điện thoại đứng/nghiêng rồi xoay cổ tay để màn hình ngửa lên trời, "
+                        + "ứng dụng sẽ Back đúng 1 lần. Nếu điện thoại nằm ngửa sẵn trên bàn thì không lặp lại.",
+                14, false);
+        faceUpHelp.setTextColor(Color.DKGRAY);
+        faceUpHelp.setPadding(dp(4), 0, dp(4), dp(6));
+        root.addView(faceUpHelp);
+
+        faceUpSensitivityLabel = text("", 15, false);
+        root.addView(faceUpSensitivityLabel);
+        faceUpSensitivity = new SeekBar(this);
+        faceUpSensitivity.setMax(100);
+        faceUpSensitivity.setMin(1);
+        faceUpSensitivity.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                faceUpSensitivityLabel.setText("Độ nhạy ngửa: " + progress + "/100  (cao hơn = dễ nhận ngửa hơn)");
+            }
+            @Override public void onStartTrackingTouch(SeekBar seekBar) {}
+            @Override public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        root.addView(faceUpSensitivity);
+
+        addHeading(root, "ĐỘ NHẠY LẮC");
         sensitivityLabel = text("", 15, false);
         root.addView(sensitivityLabel);
         sensitivity = new SeekBar(this);
@@ -100,7 +132,7 @@ public class MainActivity extends Activity {
         root.addView(save);
 
         TextView note = text(
-                "Gợi ý ban đầu: Lắc 1 lần = Back, lắc 2 lần = Chụp màn hình, độ nhạy 60. "
+                "Gợi ý ban đầu: Ngửa điện thoại = Back, lắc 1 lần = Back, lắc 2 lần = Chụp màn hình, độ nhạy lắc 60. "
                         + "Nếu hay kích hoạt nhầm khi đi xe hoặc cầm điện thoại, giảm độ nhạy xuống 40–50.",
                 14,false);
         note.setTextColor(Color.DKGRAY);
@@ -120,16 +152,23 @@ public class MainActivity extends Activity {
         String single = getSharedPreferences("prefs", MODE_PRIVATE).getString("single_action", "BACK");
         String dbl = getSharedPreferences("prefs", MODE_PRIVATE).getString("double_action", "SCREENSHOT");
         int sens = getSharedPreferences("prefs", MODE_PRIVATE).getInt("sensitivity", 60);
+        boolean faceUp = getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("face_up_back", true);
+        int faceSens = getSharedPreferences("prefs", MODE_PRIVATE).getInt("face_up_sensitivity", 65);
         singleSpinner.setSelection(indexOf(single));
         doubleSpinner.setSelection(indexOf(dbl));
+        faceUpBack.setChecked(faceUp);
+        faceUpSensitivity.setProgress(faceSens);
+        faceUpSensitivityLabel.setText("Độ nhạy ngửa: " + faceSens + "/100  (cao hơn = dễ nhận ngửa hơn)");
         sensitivity.setProgress(sens);
-        sensitivityLabel.setText("Độ nhạy: " + sens + "/100  (cao hơn = dễ kích hoạt hơn)");
+        sensitivityLabel.setText("Độ nhạy lắc: " + sens + "/100  (cao hơn = dễ kích hoạt hơn)");
     }
 
     private void saveSettings() {
         getSharedPreferences("prefs", MODE_PRIVATE).edit()
                 .putString("single_action", VALUES[singleSpinner.getSelectedItemPosition()])
                 .putString("double_action", VALUES[doubleSpinner.getSelectedItemPosition()])
+                .putBoolean("face_up_back", faceUpBack.isChecked())
+                .putInt("face_up_sensitivity", faceUpSensitivity.getProgress())
                 .putInt("sensitivity", sensitivity.getProgress())
                 .apply();
         Toast.makeText(this, "Đã lưu.", Toast.LENGTH_SHORT).show();
@@ -142,8 +181,10 @@ public class MainActivity extends Activity {
 
     private void refreshStatus() {
         boolean on = isServiceEnabled();
+        boolean faceUp = getSharedPreferences("prefs", MODE_PRIVATE).getBoolean("face_up_back", true);
         status.setText("Trợ năng Tien Shake Actions: " + (on ? "ĐANG BẬT" : "ĐANG TẮT")
-                + "\nCảm biến lắc: " + (on ? "ĐANG HOẠT ĐỘNG" : "CHƯA HOẠT ĐỘNG"));
+                + "\nCảm biến lắc: " + (on ? "ĐANG HOẠT ĐỘNG" : "CHƯA HOẠT ĐỘNG")
+                + "\nNgửa điện thoại = Back: " + (faceUp ? "BẬT" : "TẮT"));
         status.setTextColor(on ? Color.rgb(20,110,45) : Color.rgb(160,55,35));
     }
 
