@@ -6,6 +6,8 @@ import android.content.ComponentName;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.net.Uri;
+import android.os.SystemClock;
 import android.content.pm.ResolveInfo;
 import android.provider.Settings;
 import android.text.TextUtils;
@@ -381,19 +383,146 @@ public final class AccessibilityController {
             flattened.add(component.flattenToString());
         }
         String joined = TextUtils.join(":", flattened);
+
+        if (components.isEmpty()) {
+            boolean servicesWritten = Settings.Secure.putString(
+                    context.getContentResolver(),
+                    Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                    joined
+            );
+            notifySecureSetting(context, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+            SystemClock.sleep(80L);
+
+            boolean globalWritten = Settings.Secure.putInt(
+                    context.getContentResolver(),
+                    Settings.Secure.ACCESSIBILITY_ENABLED,
+                    0
+            );
+            notifySecureSetting(context, Settings.Secure.ACCESSIBILITY_ENABLED);
+
+            if (!servicesWritten || !globalWritten) {
+                throw new IllegalStateException("Secure Settings trả về false");
+            }
+            return;
+        }
+
+        // Android 15/OEMs can fail to bind a service if the service list is written while
+        // ACCESSIBILITY_ENABLED is still 0. Wake the global manager first, then write the
+        // list, then assert the global flag again.
+        boolean globalFirst = Settings.Secure.putInt(
+                context.getContentResolver(),
+                Settings.Secure.ACCESSIBILITY_ENABLED,
+                1
+        );
+        notifySecureSetting(context, Settings.Secure.ACCESSIBILITY_ENABLED);
+        SystemClock.sleep(120L);
+
         boolean servicesWritten = Settings.Secure.putString(
                 context.getContentResolver(),
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
                 joined
         );
-        boolean globalWritten = Settings.Secure.putInt(
+        notifySecureSetting(context, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        SystemClock.sleep(180L);
+
+        boolean globalLast = Settings.Secure.putInt(
                 context.getContentResolver(),
                 Settings.Secure.ACCESSIBILITY_ENABLED,
-                components.isEmpty() ? 0 : 1
+                1
         );
-        if (!servicesWritten || !globalWritten) {
+        notifySecureSetting(context, Settings.Secure.ACCESSIBILITY_ENABLED);
+        notifySecureSetting(context, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+
+        if (!globalFirst || !servicesWritten || !globalLast) {
             throw new IllegalStateException("Secure Settings trả về false");
         }
+
+        if (waitForManagerToSeeAll(context, components, 1200L)) {
+            return;
+        }
+
+        // Strong fallback for Android 15/OEM builds: pulse the global accessibility
+        // manager without changing the service list. This forces AccessibilityManagerService
+        // to reload/bind the services that are already present in the secure setting.
+        Settings.Secure.putInt(
+                context.getContentResolver(),
+                Settings.Secure.ACCESSIBILITY_ENABLED,
+                0
+        );
+        notifySecureSetting(context, Settings.Secure.ACCESSIBILITY_ENABLED);
+        SystemClock.sleep(180L);
+
+        Settings.Secure.putString(
+                context.getContentResolver(),
+                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES,
+                joined
+        );
+        notifySecureSetting(context, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+        SystemClock.sleep(120L);
+
+        Settings.Secure.putInt(
+                context.getContentResolver(),
+                Settings.Secure.ACCESSIBILITY_ENABLED,
+                1
+        );
+        notifySecureSetting(context, Settings.Secure.ACCESSIBILITY_ENABLED);
+        notifySecureSetting(context, Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES);
+
+        if (!waitForManagerToSeeAll(context, components, 1800L)) {
+            throw new IllegalStateException(
+                    "Android đã ghi trạng thái ON nhưng chưa khởi động lại dịch vụ Trợ năng."
+            );
+        }
+    }
+
+    private static void notifySecureSetting(Context context, String key) {
+        try {
+            Uri uri = Settings.Secure.getUriFor(key);
+            context.getContentResolver().notifyChange(uri, null);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static boolean waitForManagerToSeeAll(
+            Context context,
+            Set<ComponentName> expected,
+            long timeoutMs
+    ) {
+        long deadline = SystemClock.elapsedRealtime() + timeoutMs;
+        do {
+            Set<ComponentName> managerEnabled = readManagerEnabledComponents(context);
+            if (managerEnabled.containsAll(expected)) {
+                return true;
+            }
+            SystemClock.sleep(120L);
+        } while (SystemClock.elapsedRealtime() < deadline);
+        return false;
+    }
+
+    private static Set<ComponentName> readManagerEnabledComponents(Context context) {
+        AccessibilityManager manager =
+                (AccessibilityManager) context.getSystemService(Context.ACCESSIBILITY_SERVICE);
+        LinkedHashSet<ComponentName> result = new LinkedHashSet<>();
+        if (manager == null) {
+            return result;
+        }
+        List<AccessibilityServiceInfo> enabled =
+                manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
+        if (enabled == null) {
+            return result;
+        }
+        for (AccessibilityServiceInfo info : enabled) {
+            if (info == null || info.getResolveInfo() == null
+                    || info.getResolveInfo().serviceInfo == null) {
+                continue;
+            }
+            String packageName = info.getResolveInfo().serviceInfo.packageName;
+            String className = info.getResolveInfo().serviceInfo.name;
+            if (!TextUtils.isEmpty(packageName) && !TextUtils.isEmpty(className)) {
+                result.add(new ComponentName(packageName, className));
+            }
+        }
+        return result;
     }
 
     private static LinkedHashSet<String> flatten(Set<ComponentName> components) {
