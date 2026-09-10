@@ -71,10 +71,9 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView description = text(
-                "Bản Android 15 này có thể tự cấp WRITE_SECURE_SETTINGS ngay trên điện thoại "
-                        + "bằng Gỡ lỗi không dây, không cần cáp USB và không cần máy tính. "
-                        + "Sau khi cấp quyền một lần, bạn dùng “MỞ APP AN TOÀN” và "
-                        + "“BẬT TẮT TRỢ NĂNG” như bình thường.",
+                "Ngoài màn hình chính chỉ còn DUY NHẤT một biểu tượng “BẬT TẮT TRỢ NĂNG”. "
+                        + "Bấm một lần để OFF, bấm lần nữa để ON lại các dịch vụ đã chọn. "
+                        + "Muốn mở phần cài đặt MB Guard, hãy NHẤN GIỮ biểu tượng đó rồi chọn “Cài đặt MB Guard”.",
                 16,
                 false
         );
@@ -93,15 +92,17 @@ public class MainActivity extends Activity {
         usageButton.setOnClickListener(v -> openUsageAccessSettings());
         root.addView(usageButton);
 
+        if (isOldGuardInstalled()) {
+            Button removeOldButton = button("GỠ MB GUARD CŨ / XÓA CÁC ICON CŨ");
+            removeOldButton.setOnClickListener(v -> uninstallOldGuard());
+            root.addView(removeOldButton);
+        }
+
         quickAppStatus = statusCard(root, "2. Ứng dụng cần bảo vệ");
 
         Button selectAppButton = button("Chọn nhiều ứng dụng cần bảo vệ");
         selectAppButton.setOnClickListener(v -> showQuickAppSelectionDialog());
         root.addView(selectAppButton);
-
-        Button createShortcutButton = button("Tạo phím tắt mở thẳng từng ứng dụng");
-        createShortcutButton.setOnClickListener(v -> showCreateShortcutDialog());
-        root.addView(createShortcutButton);
 
         serviceStatus = statusCard(root, "3. Accessibility cần tắt tạm thời");
 
@@ -134,10 +135,9 @@ public class MainActivity extends Activity {
         root.addView(messageView);
 
         TextView note = text(
-                "Biểu tượng “MỞ APP AN TOÀN” chỉ tắt Accessibility rồi đóng ngay. "
-                        + "Bạn tự bấm ứng dụng ngân hàng sau đó. Muốn một lần bấm vừa tắt Accessibility "
-                        + "vừa mở thẳng MB Bank hoặc ứng dụng khác, dùng nút tạo phím tắt riêng ở trên. "
-                        + "Watchdog chỉ chạy tạm thời sau cú bấm và tự dừng khi đã bật lại.",
+                "Bản này không còn tạo icon “MB Guard Android 15” hay “MỞ APP AN TOÀN” ngoài màn hình. "
+                        + "Chỉ icon công tắc “BẬT TẮT TRỢ NĂNG” được giữ lại. "
+                        + "Nếu máy vẫn còn icon xanh dương của bản cũ, hãy dùng nút “GỠ MB GUARD CŨ” ở phía trên.",
                 14,
                 false
         );
@@ -610,6 +610,36 @@ public class MainActivity extends Activity {
         } catch (Exception exception) {
             startActivity(new Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS));
         }
+    }
+
+    private static final String OLD_GUARD_PACKAGE = "com.mrtien.mbbankguard";
+
+    private boolean isOldGuardInstalled() {
+        try {
+            if (Build.VERSION.SDK_INT >= 33) {
+                getPackageManager().getPackageInfo(
+                        OLD_GUARD_PACKAGE,
+                        PackageManager.PackageInfoFlags.of(0)
+                );
+            } else {
+                getPackageManager().getPackageInfo(OLD_GUARD_PACKAGE, 0);
+            }
+            return true;
+        } catch (PackageManager.NameNotFoundException exception) {
+            return false;
+        }
+    }
+
+    private void uninstallOldGuard() {
+        if (!isOldGuardInstalled()) {
+            showMessage("Bản MB Guard cũ đã được gỡ.", false);
+            return;
+        }
+        Intent uninstall = new Intent(
+                Intent.ACTION_DELETE,
+                Uri.parse("package:" + OLD_GUARD_PACKAGE)
+        );
+        startActivity(uninstall);
     }
 
     private void openAppSettings() {
