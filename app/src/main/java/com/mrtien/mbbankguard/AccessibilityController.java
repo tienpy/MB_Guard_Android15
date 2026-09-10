@@ -93,7 +93,7 @@ public final class AccessibilityController {
             return Collections.emptyList();
         }
 
-        Set<ComponentName> enabled = readEnabledComponents(context);
+        Set<ComponentName> enabled = readManagerEnabledComponents(context);
         List<InstalledService> result = new ArrayList<>();
         PackageManager packageManager = context.getPackageManager();
 
@@ -149,7 +149,7 @@ public final class AccessibilityController {
 
     public static int getEnabledSelectedCount(Context context) {
         Set<ComponentName> selected = getSelectedComponents(context);
-        Set<ComponentName> enabled = readEnabledComponents(context);
+        Set<ComponentName> enabled = readManagerEnabledComponents(context);
         int count = 0;
         for (ComponentName component : selected) {
             if (enabled.contains(component)) {
@@ -296,9 +296,10 @@ public final class AccessibilityController {
 
         LinkedHashSet<ComponentName> enabled =
                 new LinkedHashSet<>(readEnabledComponents(context));
+        Set<ComponentName> managerEnabled = readManagerEnabledComponents(context);
         boolean anySelectedEnabled = false;
         for (ComponentName component : selected) {
-            if (enabled.contains(component)) {
+            if (managerEnabled.contains(component)) {
                 anySelectedEnabled = true;
                 break;
             }
