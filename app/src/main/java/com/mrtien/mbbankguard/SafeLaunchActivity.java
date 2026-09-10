@@ -54,6 +54,10 @@ public class SafeLaunchActivity extends Activity {
             failSilently("Chưa chọn Accessibility cần tắt trong MB Guard Cài đặt.");
             return;
         }
+        if (AccessibilityController.getEnabledSelectedCount(this) == 0) {
+            failSilently("Các Trợ năng đã chọn hiện đang OFF. Hãy bật chúng bằng nút BẬT/TẮT TRỢ NĂNG trước.");
+            return;
+        }
 
         Intent launchIntent = null;
         if (!TextUtils.isEmpty(targetPackage)) {
