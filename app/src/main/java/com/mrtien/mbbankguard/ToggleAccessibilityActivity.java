@@ -27,6 +27,7 @@ public class ToggleAccessibilityActivity extends Activity {
 
         if (!AccessibilityController.hasWriteSecureSettings(this)
                 || AccessibilityController.getSelectedComponents(this).isEmpty()) {
+            LauncherIconController.setOn(this, false);
             openSettings();
             return;
         }
@@ -54,6 +55,8 @@ public class ToggleAccessibilityActivity extends Activity {
                                 : "Android chưa bật lại Trợ năng. Hãy thử bấm lại.";
                     }
                 }
+
+                LauncherIconController.sync(this);
 
                 Toast.makeText(
                         this,
