@@ -30,14 +30,14 @@
 
     <application
         android:allowBackup="false"
-        android:icon="@drawable/ic_toggle_accessibility"
+        android:icon="@drawable/ic_toggle_accessibility_off"
         android:label="@string/toggle_accessibility_name"
-        android:roundIcon="@drawable/ic_toggle_accessibility"
+        android:roundIcon="@drawable/ic_toggle_accessibility_off"
         android:supportsRtl="true"
         android:theme="@style/AppTheme"
         android:usesCleartextTraffic="false">
 
-        <!-- Màn hình cài đặt vẫn tồn tại nhưng KHÔNG tạo icon riêng ngoài màn hình. -->
+        <!-- Màn hình cài đặt không tạo icon riêng. -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -48,8 +48,7 @@
             android:exported="false"
             android:label="Cấp quyền trên điện thoại" />
 
-        <!-- Giữ chức năng MỞ APP AN TOÀN để tương thích dữ liệu cũ,
-             nhưng KHÔNG còn là launcher icon. -->
+        <!-- Giữ logic cũ ở bên trong, không có launcher icon. -->
         <activity
             android:name=".SafeLaunchActivity"
             android:excludeFromRecents="true"
@@ -61,29 +60,53 @@
             android:taskAffinity="com.mrtien.mbbankguard.safe"
             android:theme="@style/TransparentLaunchTheme" />
 
-        <!-- DUY NHẤT activity này có MAIN/LAUNCHER: ngoài màn hình chỉ có 1 icon. -->
+        <!-- Activity thật không có MAIN/LAUNCHER. Hai alias bên dưới thay nhau hiển thị
+             ở CÙNG một vị trí với cùng một tên, chỉ khác màu icon. -->
         <activity
             android:name=".ToggleAccessibilityActivity"
             android:excludeFromRecents="true"
             android:exported="true"
             android:finishOnTaskLaunch="true"
-            android:icon="@drawable/ic_toggle_accessibility"
             android:label="@string/toggle_accessibility_name"
             android:launchMode="singleTask"
             android:noHistory="true"
-            android:roundIcon="@drawable/ic_toggle_accessibility"
             android:taskAffinity="com.mrtien.mbbankguard.toggle"
-            android:theme="@style/TransparentLaunchTheme">
+            android:theme="@style/TransparentLaunchTheme" />
+
+        <!-- OFF là trạng thái mặc định an toàn khi mới cài/chưa cấu hình. -->
+        <activity-alias
+            android:name=".ToggleAccessibilityOffAlias"
+            android:enabled="true"
+            android:exported="true"
+            android:icon="@drawable/ic_toggle_accessibility_off"
+            android:label="@string/toggle_accessibility_name"
+            android:roundIcon="@drawable/ic_toggle_accessibility_off"
+            android:targetActivity=".ToggleAccessibilityActivity">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
-            <!-- Nhấn giữ icon -> CÀI ĐẶT MB GUARD, không tạo thêm icon ngoài màn hình. -->
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
-        </activity>
+        </activity-alias>
+
+        <activity-alias
+            android:name=".ToggleAccessibilityOnAlias"
+            android:enabled="false"
+            android:exported="true"
+            android:icon="@drawable/ic_toggle_accessibility_on"
+            android:label="@string/toggle_accessibility_name"
+            android:roundIcon="@drawable/ic_toggle_accessibility_on"
+            android:targetActivity=".ToggleAccessibilityActivity">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
+        </activity-alias>
 
         <service
             android:name=".RecoveryWatchdogService"
