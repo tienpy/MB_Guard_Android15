@@ -1,0 +1,120 @@
+name: Build Tien Call Recorder Pro
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'callrecorder-pro/**'
+      - '.github/workflows/build-callrecorder-pro.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout wrapper repo
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK components
+        run: |
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Restore Tien signing key
+        shell: bash
+        run: |
+          mkdir -p signing
+          base64 -d signing/mbguard15.p12.b64 > signing/mbguard15.p12
+          keytool -importkeystore \
+            -srckeystore signing/mbguard15.p12 \
+            -srcstoretype PKCS12 \
+            -srcstorepass MBGuard15_2026 \
+            -srcalias mbguard15 \
+            -destkeystore signing/tien-call-recorder-pro.jks \
+            -deststoretype JKS \
+            -deststorepass MBGuard15_2026 \
+            -destalias mbguard15 \
+            -destkeypass MBGuard15_2026 \
+            -noprompt
+
+      - name: Clone pinned CallVault source
+        run: |
+          git clone --depth 1 --branch v1.5.7 https://github.com/madkongo/CallVault.git CallVault
+          rm -rf CallVault/.git
+
+      - name: Apply Tien Call Recorder Pro patches
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          strings = Path('CallVault/app/src/main/res/values/strings.xml')
+          s = strings.read_text(encoding='utf-8')
+          s = s.replace('<string name="app_name" translatable="false">CallVault</string>',
+                        '<string name="app_name" translatable="false">Tien Call Recorder Pro</string>')
+          strings.write_text(s, encoding='utf-8')
+
+          prefs = Path('CallVault/app/src/main/java/com/baba/callvault/data/AppPreferences.kt')
+          s = prefs.read_text(encoding='utf-8')
+          s = s.replace('const val AUTO_RECORD_INCOMING = false', 'const val AUTO_RECORD_INCOMING = true')
+          s = s.replace('const val AUTO_RECORD_OUTGOING = false', 'const val AUTO_RECORD_OUTGOING = true')
+          s = s.replace('const val UPDATE_CHECK_ENABLED = true', 'const val UPDATE_CHECK_ENABLED = false')
+          s = s.replace('const val VOIP_RECORDING_ENABLED = false', 'const val VOIP_RECORDING_ENABLED = true')
+          s = s.replace('const val VOIP_AUTO_START = true', 'const val VOIP_AUTO_START = true')
+          prefs.write_text(s, encoding='utf-8')
+
+          notice = Path('CallVault/TIEN_FORK_NOTICE.md')
+          notice.write_text('''# Tien Call Recorder Pro fork notice\n\n'
+          'This build is based on CallVault v1.5.7 by madkongo, which is based on ShizuCallRecorder by kitsumed.\n\n'
+          'This fork is not affiliated with, endorsed by, or supported by the CallVault or ShizuCallRecorder authors.\n'
+          'The upstream LICENSE and NOTICE files are preserved.\n'
+          'Local changes: visible app name, auto-record defaults, VoIP default, and updater default.\n'
+          ''', encoding='utf-8')
+          PY
+
+      - name: Archive patched GPL source
+        run: |
+          tar --exclude='CallVault/.gradle' --exclude='CallVault/**/build' -czf Tien_Call_Recorder_Pro_v2.0.0_source.tar.gz CallVault
+
+      - name: Build signed release APK
+        working-directory: CallVault
+        env:
+          KEYSTORE_FILE: ${{ github.workspace }}/signing/tien-call-recorder-pro.jks
+          KEYSTORE_PASSWORD: MBGuard15_2026
+          KEY_ALIAS: mbguard15
+          KEY_PASSWORD: MBGuard15_2026
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:assembleRelease -PversionCode=20000 -PversionName=2.0.0 -PciBuildNumber=${{ github.run_number }}
+
+      - name: Prepare APK
+        run: |
+          cp CallVault/app/build/outputs/apk/release/app-release.apk Tien_Call_Recorder_Pro_v2.0.0.apk
+          sha256sum Tien_Call_Recorder_Pro_v2.0.0.apk > Tien_Call_Recorder_Pro_v2.0.0.sha256
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tien_Call_Recorder_Pro_v2.0.0
+          path: |
+            Tien_Call_Recorder_Pro_v2.0.0.apk
+            Tien_Call_Recorder_Pro_v2.0.0.sha256
+          if-no-files-found: error
+
+      - name: Upload corresponding source
+        uses: actions/upload-artifact@v4
+        with:
+          name: Tien_Call_Recorder_Pro_v2.0.0_source
+          path: Tien_Call_Recorder_Pro_v2.0.0_source.tar.gz
+          if-no-files-found: error
