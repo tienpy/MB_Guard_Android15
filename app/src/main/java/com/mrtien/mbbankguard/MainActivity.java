@@ -109,6 +109,10 @@ public class MainActivity extends Activity {
         selectServicesButton.setOnClickListener(v -> showServiceSelectionDialog());
         root.addView(selectServicesButton);
 
+        Button toggleNowButton = primaryButton("BẬT / TẮT TRỢ NĂNG ĐÃ CHỌN NGAY");
+        toggleNowButton.setOnClickListener(v -> toggleAccessibilityNow());
+        root.addView(toggleNowButton);
+
         runtimeStatus = statusCard(root, "4. Trạng thái hoạt động");
 
         Button testButton = primaryButton("THỬ TẮT ACCESSIBILITY MỘT CHẠM");
@@ -237,10 +241,14 @@ public class MainActivity extends Activity {
                 AccessibilityController.getInstalledServices(this);
         Set<ComponentName> selected = AccessibilityController.getSelectedComponents(this);
         StringBuilder selectedText = new StringBuilder();
+        int selectedOnCount = 0;
         for (AccessibilityController.InstalledService service : installed) {
             if (selected.contains(service.componentName)) {
                 if (selectedText.length() > 0) {
                     selectedText.append('\n');
+                }
+                if (service.enabled) {
+                    selectedOnCount++;
                 }
                 selectedText.append(service.enabled ? "ON  • " : "OFF • ")
                         .append(service.label);
@@ -249,8 +257,14 @@ public class MainActivity extends Activity {
         if (selectedText.length() == 0) {
             selectedText.append("Chưa chọn dịch vụ nào.");
         }
-        serviceStatus.setText("Đã chọn " + selected.size() + " dịch vụ\n" + selectedText);
-        serviceStatus.setTextColor(selected.isEmpty()
+        serviceStatus.setText("Đã chọn " + selected.size() + " dịch vụ"
+                + "\nĐang ON: " + selectedOnCount + "/" + selected.size()
+                + "\n" + selectedText
+                + (selected.isEmpty() ? ""
+                : selectedOnCount == 0
+                ? "\n→ Hiện tất cả đang OFF. Bấm nút BẬT / TẮT bên dưới để bật."
+                : ""));
+        serviceStatus.setTextColor(selected.isEmpty() || selectedOnCount == 0
                 ? Color.rgb(160, 55, 35)
                 : Color.rgb(20, 110, 45));
 
@@ -566,6 +580,14 @@ public class MainActivity extends Activity {
                 .toLowerCase(Locale.ROOT)
                 .trim()
                 .replaceAll("\\s+", " ");
+    }
+
+    private void toggleAccessibilityNow() {
+        RecoveryWatchdogService.cancelWithoutRestore(this);
+        AccessibilityController.Result result =
+                AccessibilityController.toggleSelectedServicesManually(this);
+        showMessage(result.message, !result.success);
+        refreshStatus();
     }
 
     private void restoreNow() {
