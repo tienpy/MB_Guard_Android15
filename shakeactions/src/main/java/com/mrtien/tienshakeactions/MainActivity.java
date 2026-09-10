@@ -120,7 +120,7 @@ public class MainActivity extends Activity {
         sensitivity.setMin(1);
         sensitivity.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                sensitivityLabel.setText("Độ nhạy: " + progress + "/100  (cao hơn = dễ kích hoạt hơn)");
+                sensitivityLabel.setText("Độ nhạy lắc: " + progress + "/100  (cao hơn = dễ kích hoạt hơn)");
             }
             @Override public void onStartTrackingTouch(SeekBar seekBar) {}
             @Override public void onStopTrackingTouch(SeekBar seekBar) {}
