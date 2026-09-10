@@ -282,6 +282,8 @@ public class MainActivity extends Activity {
         runtimeStatus.setTextColor(armed || active
                 ? Color.rgb(180, 105, 10)
                 : Color.rgb(20, 110, 45));
+
+        LauncherIconController.sync(this);
     }
 
     private void showQuickAppSelectionDialog() {
