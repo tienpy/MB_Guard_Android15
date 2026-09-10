@@ -354,18 +354,8 @@ public class RecoveryWatchdogService extends Service {
 
     public static void cancelWithoutRestore(Context context) {
         storeArmedState(context, false, null);
-        Intent intent = new Intent(context, RecoveryWatchdogService.class)
-                .setAction(ACTION_CANCEL_WITHOUT_RESTORE);
         try {
             context.stopService(new Intent(context, RecoveryWatchdogService.class));
-        } catch (Exception ignored) {
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent);
-            } else {
-                context.startService(intent);
-            }
         } catch (Exception ignored) {
         }
     }
