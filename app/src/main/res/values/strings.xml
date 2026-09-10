@@ -2,4 +2,7 @@
     <string name="app_name">MB Guard Android 15</string>
     <string name="safe_launcher_name">MỞ APP AN TOÀN</string>
     <string name="toggle_accessibility_name">BẬT TẮT TRỢ NĂNG</string>
+    <string name="settings_title">Cài đặt MB Guard</string>
+    <string name="settings_shortcut">Cài đặt MB Guard</string>
+    <string name="settings_shortcut_long">Mở phần cài đặt MB Guard</string>
 </resources>
