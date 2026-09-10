@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
     protected void onResume() {
         super.onResume();
         refreshStatus();
+        LauncherIconController.sync(this);
     }
 
     private View createContentView() {
@@ -588,6 +589,7 @@ public class MainActivity extends Activity {
                 AccessibilityController.toggleSelectedServicesManually(this);
         showMessage(result.message, !result.success);
         refreshStatus();
+        LauncherIconController.sync(this);
     }
 
     private void restoreNow() {
