@@ -1,6 +1,7 @@
 package com.mrtien.tienshakeactions;
 
 import android.accessibilityservice.AccessibilityService;
+import android.content.SharedPreferences;
 import android.hardware.Sensor;
 import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
@@ -9,18 +10,15 @@ import android.os.SystemClock;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.view.accessibility.AccessibilityEvent;
+import android.widget.Toast;
 
 /**
- * Gesture engine rebuilt around the phone gyroscope.
+ * Gyroscope gesture engine with per-device gesture learning.
  *
- * A gesture is accepted only when:
- * 1. the phone has been relatively still long enough to ARM;
- * 2. one rotational axis becomes clearly dominant;
- * 3. the integrated angle crosses the configured threshold;
- * 4. after firing, the phone must become still again before another gesture can fire.
- *
- * This deliberately avoids accelerometer "shake" detection so ordinary hand movement,
- * walking, or putting the phone on a table does not create repeated Back actions.
+ * The phone's physical gyro axes do not always match a user's intuitive idea of
+ * "face up / left / right" because hand grip and device posture differ. Instead
+ * of guessing, every named gesture can learn one of the six raw gyro signatures:
+ * X+, X-, Y+, Y-, Z+, Z-.
  */
 public class ShakeAccessibilityService extends AccessibilityService
         implements SensorEventListener {
@@ -28,6 +26,42 @@ public class ShakeAccessibilityService extends AccessibilityService
     private static final int AXIS_X = 0;
     private static final int AXIS_Y = 1;
     private static final int AXIS_Z = 2;
+
+    private static final String[] GESTURE_KEYS = {
+            "gesture_face_up",
+            "gesture_face_down",
+            "gesture_tilt_left",
+            "gesture_tilt_right",
+            "gesture_twist_left",
+            "gesture_twist_right"
+    };
+
+    private static final String[] GESTURE_LABELS = {
+            "Ngửa máy",
+            "Cúi máy",
+            "Nghiêng trái",
+            "Nghiêng phải",
+            "Xoay trái",
+            "Xoay phải"
+    };
+
+    private static final String[] MAP_KEYS = {
+            "map_face_up",
+            "map_face_down",
+            "map_tilt_left",
+            "map_tilt_right",
+            "map_twist_left",
+            "map_twist_right"
+    };
+
+    private static final String[] DEFAULT_SIGNATURES = {
+            "X+",
+            "X-",
+            "Y-",
+            "Y+",
+            "Z-",
+            "Z+"
+    };
 
     private SensorManager sensorManager;
     private Sensor gyroscope;
@@ -46,6 +80,8 @@ public class ShakeAccessibilityService extends AccessibilityService
     @Override
     protected void onServiceConnected() {
         super.onServiceConnected();
+        migrateV201();
+
         sensorManager = (SensorManager) getSystemService(SENSOR_SERVICE);
         if (sensorManager == null) {
             return;
@@ -60,10 +96,38 @@ public class ShakeAccessibilityService extends AccessibilityService
             );
         }
 
+        resetDetector();
+    }
+
+    private void migrateV201() {
+        SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
+        if (prefs.getInt("gesture_engine_version", 0) >= 201) {
+            return;
+        }
+
+        prefs.edit()
+                .putInt("gesture_engine_version", 201)
+                .putInt("gyro_sensitivity", 60)
+                .putInt("cooldown_ms", 700)
+                .remove("learn_gesture")
+                .remove("invert_pitch")
+                .remove("invert_roll")
+                .remove("invert_yaw")
+                .putString("last_gesture", "Hãy bấm HỌC NGỬA MÁY rồi thực hiện cử chỉ")
+                .putLong("last_gesture_time", System.currentTimeMillis())
+                .apply();
+    }
+
+    private void resetDetector() {
+        previousSensorTimestampNs = 0L;
         armed = false;
         stillSinceMs = 0L;
         tracking = false;
-        previousSensorTimestampNs = 0L;
+        trackingAxis = -1;
+        integratedAngleRad = 0.0;
+        gestureStartedMs = 0L;
+        lastMeaningfulMotionMs = 0L;
+        cooldownUntilMs = 0L;
     }
 
     @Override
@@ -100,7 +164,6 @@ public class ShakeAccessibilityService extends AccessibilityService
         int sensitivity = getSharedPreferences("prefs", MODE_PRIVATE)
                 .getInt("gyro_sensitivity", 60);
 
-        // Higher sensitivity means a smaller rotation angle and a lower start speed.
         double triggerDegrees = 37.0 - (sensitivity * 0.22);
         if (triggerDegrees < 14.0) triggerDegrees = 14.0;
         if (triggerDegrees > 36.0) triggerDegrees = 36.0;
@@ -114,13 +177,11 @@ public class ShakeAccessibilityService extends AccessibilityService
         final double meaningfulSpeed = 0.30;
 
         if (!tracking) {
-            // Re-arm only after the phone has settled. This is the main protection
-            // against "jumping around" and repeated actions from one physical movement.
             if (max < stillSpeed) {
                 if (stillSinceMs == 0L) {
                     stillSinceMs = nowMs;
                 }
-                if (nowMs - stillSinceMs >= 320L && nowMs >= cooldownUntilMs) {
+                if (nowMs - stillSinceMs >= 380L && nowMs >= cooldownUntilMs) {
                     armed = true;
                 }
             } else {
@@ -135,9 +196,8 @@ public class ShakeAccessibilityService extends AccessibilityService
             double first = axisAbs(dominant, ax, ay, az);
             double second = secondLargest(dominant, ax, ay, az);
 
-            // Reject diagonal / chaotic movements. Micro-gesture style motion should
-            // have one axis clearly stronger than the others.
-            if (second > 0.0 && first < second * 1.28) {
+            // Reject diagonal/noisy motion unless one axis is clearly dominant.
+            if (second > 0.0 && first < second * 1.22) {
                 return;
             }
 
@@ -158,93 +218,136 @@ public class ShakeAccessibilityService extends AccessibilityService
                 lastMeaningfulMotionMs = nowMs;
             }
 
-            // Fire immediately once the requested rotational angle is reached.
             if (Math.abs(integratedAngleRad) >= triggerRadians
                     && nowMs - gestureStartedMs >= 80L) {
                 int direction = integratedAngleRad >= 0.0 ? 1 : -1;
+                int axis = trackingAxis;
                 finishGesture(nowMs);
-                executeRotationGesture(trackingAxis, direction);
+                onRawGesture(signature(axis, direction));
                 return;
             }
 
-            // A short motion that never crossed the angle threshold is cancelled.
-            if (nowMs - gestureStartedMs > 950L
-                    || nowMs - lastMeaningfulMotionMs > 180L) {
-                tracking = false;
-                trackingAxis = -1;
-                integratedAngleRad = 0.0;
-                stillSinceMs = 0L;
+            if (nowMs - gestureStartedMs > 1000L
+                    || nowMs - lastMeaningfulMotionMs > 200L) {
+                cancelTracking();
             }
         }
     }
 
     private void finishGesture(long nowMs) {
-        tracking = false;
-        trackingAxis = -1;
-        integratedAngleRad = 0.0;
-        stillSinceMs = 0L;
+        cancelTracking();
 
         int cooldown = getSharedPreferences("prefs", MODE_PRIVATE)
-                .getInt("cooldown_ms", 650);
+                .getInt("cooldown_ms", 700);
         if (cooldown < 300) cooldown = 300;
         if (cooldown > 1500) cooldown = 1500;
         cooldownUntilMs = nowMs + cooldown;
     }
 
-    private void executeRotationGesture(int axis, int direction) {
-        boolean invertPitch = getSharedPreferences("prefs", MODE_PRIVATE)
-                .getBoolean("invert_pitch", false);
-        boolean invertRoll = getSharedPreferences("prefs", MODE_PRIVATE)
-                .getBoolean("invert_roll", false);
-        boolean invertYaw = getSharedPreferences("prefs", MODE_PRIVATE)
-                .getBoolean("invert_yaw", false);
+    private void cancelTracking() {
+        tracking = false;
+        trackingAxis = -1;
+        integratedAngleRad = 0.0;
+        gestureStartedMs = 0L;
+        lastMeaningfulMotionMs = 0L;
+        stillSinceMs = 0L;
+    }
 
-        if (axis == AXIS_X && invertPitch) direction *= -1;
-        if (axis == AXIS_Y && invertRoll) direction *= -1;
-        if (axis == AXIS_Z && invertYaw) direction *= -1;
+    private void onRawGesture(String rawSignature) {
+        SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
+        String learningGesture = prefs.getString("learn_gesture", "");
 
-        final String gestureKey;
-        final String gestureLabel;
-
-        if (axis == AXIS_X) {
-            if (direction > 0) {
-                gestureKey = "gesture_face_up";
-                gestureLabel = "Ngửa máy";
-            } else {
-                gestureKey = "gesture_face_down";
-                gestureLabel = "Cúi máy";
-            }
-        } else if (axis == AXIS_Y) {
-            if (direction > 0) {
-                gestureKey = "gesture_tilt_right";
-                gestureLabel = "Nghiêng phải";
-            } else {
-                gestureKey = "gesture_tilt_left";
-                gestureLabel = "Nghiêng trái";
-            }
-        } else {
-            if (direction > 0) {
-                gestureKey = "gesture_twist_right";
-                gestureLabel = "Xoay phải";
-            } else {
-                gestureKey = "gesture_twist_left";
-                gestureLabel = "Xoay trái";
-            }
+        if (learningGesture != null && !learningGesture.isEmpty()) {
+            learnGesture(learningGesture, rawSignature);
+            return;
         }
 
-        String action = getSharedPreferences("prefs", MODE_PRIVATE)
-                .getString(gestureKey, "NONE");
+        int index = ownerIndexForSignature(rawSignature);
+        if (index < 0) {
+            return;
+        }
 
-        getSharedPreferences("prefs", MODE_PRIVATE).edit()
+        String gestureKey = GESTURE_KEYS[index];
+        String gestureLabel = GESTURE_LABELS[index];
+
+        prefs.edit()
                 .putString("last_gesture", gestureLabel)
                 .putLong("last_gesture_time", System.currentTimeMillis())
                 .apply();
 
+        String action = prefs.getString(gestureKey, "NONE");
         executeAction(action);
+    }
+
+    private void learnGesture(String gestureKey, String newSignature) {
+        int targetIndex = indexForGestureKey(gestureKey);
+        if (targetIndex < 0) {
+            getSharedPreferences("prefs", MODE_PRIVATE)
+                    .edit()
+                    .remove("learn_gesture")
+                    .apply();
+            return;
+        }
+
+        SharedPreferences prefs = getSharedPreferences("prefs", MODE_PRIVATE);
+        String oldSignature = getSignatureForIndex(targetIndex);
+        int previousOwner = ownerIndexForSignature(newSignature);
+
+        SharedPreferences.Editor editor = prefs.edit();
+
+        // Swap mappings so every raw direction always belongs to exactly one named gesture.
+        if (previousOwner >= 0 && previousOwner != targetIndex) {
+            editor.putString(MAP_KEYS[previousOwner], oldSignature);
+        }
+
+        editor.putString(MAP_KEYS[targetIndex], newSignature);
+        editor.remove("learn_gesture");
+        editor.putString(
+                "last_gesture",
+                "ĐÃ HỌC: " + GESTURE_LABELS[targetIndex]
+        );
+        editor.putLong("last_gesture_time", System.currentTimeMillis());
+        editor.apply();
+
+        longVibrate();
+        Toast.makeText(
+                this,
+                "Đã học " + GESTURE_LABELS[targetIndex] + ". Bây giờ thử lại.",
+                Toast.LENGTH_LONG
+        ).show();
+    }
+
+    private int ownerIndexForSignature(String signature) {
+        for (int i = 0; i < MAP_KEYS.length; i++) {
+            if (signature.equals(getSignatureForIndex(i))) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private String getSignatureForIndex(int index) {
+        return getSharedPreferences("prefs", MODE_PRIVATE)
+                .getString(MAP_KEYS[index], DEFAULT_SIGNATURES[index]);
+    }
+
+    private int indexForGestureKey(String key) {
+        for (int i = 0; i < GESTURE_KEYS.length; i++) {
+            if (GESTURE_KEYS[i].equals(key)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    private String signature(int axis, int direction) {
+        String axisName = axis == AXIS_X ? "X" : axis == AXIS_Y ? "Y" : "Z";
+        return axisName + (direction >= 0 ? "+" : "-");
     }
 
     private void executeAction(String action) {
         int global = -1;
+
         if ("BACK".equals(action)) {
             global = GLOBAL_ACTION_BACK;
         } else if ("HOME".equals(action)) {
@@ -264,7 +367,7 @@ public class ShakeAccessibilityService extends AccessibilityService
         boolean ok = performGlobalAction(global);
         if (ok && getSharedPreferences("prefs", MODE_PRIVATE)
                 .getBoolean("vibrate_feedback", true)) {
-            vibrate();
+            shortVibrate();
         }
     }
 
@@ -292,12 +395,20 @@ public class ShakeAccessibilityService extends AccessibilityService
         return z;
     }
 
-    private void vibrate() {
+    private void shortVibrate() {
+        vibrate(28L);
+    }
+
+    private void longVibrate() {
+        vibrate(100L);
+    }
+
+    private void vibrate(long durationMs) {
         try {
             Vibrator vibrator = (Vibrator) getSystemService(VIBRATOR_SERVICE);
             if (vibrator != null && vibrator.hasVibrator()) {
                 vibrator.vibrate(VibrationEffect.createOneShot(
-                        28L,
+                        durationMs,
                         VibrationEffect.DEFAULT_AMPLITUDE
                 ));
             }
