@@ -1,0 +1,245 @@
+name: Package MB Guard Full Source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/package-mbguard-source.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package-source:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Generate Gradle wrapper
+        run: gradle wrapper --gradle-version 8.13 --distribution-type bin
+
+      - name: Create standalone source package
+        shell: bash
+        run: |
+          set -e
+          PKG="MB_Guard_Android15_FULL_SOURCE_v1.5.4"
+          rm -rf "$PKG"
+          mkdir -p "$PKG"
+
+          cp -R app "$PKG/app"
+          cp build.gradle.kts "$PKG/build.gradle.kts"
+          cp gradle.properties "$PKG/gradle.properties"
+          cp -R signing "$PKG/signing"
+          cp gradlew "$PKG/gradlew"
+          cp gradlew.bat "$PKG/gradlew.bat"
+          cp -R gradle "$PKG/gradle"
+
+          cat > "$PKG/settings.gradle.kts" <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven("https://jitpack.io")
+              }
+          }
+
+          rootProject.name = "MB_Guard_Android15"
+          include(":app")
+          EOF
+
+          cat > "$PKG/BUILD_APK.bat" <<'EOF'
+          @echo off
+          setlocal EnableExtensions
+          cd /d "%~dp0"
+          title MB Guard Android 15 - Build APK
+          echo ============================================================
+          echo   MB GUARD ANDROID 15 - BUILD APK
+          echo ============================================================
+          echo.
+
+          rem ---- Find Java 17+ ----
+          if defined JAVA_HOME if exist "%JAVA_HOME%\bin\java.exe" goto :java_ok
+          if exist "C:\Program Files\Android\Android Studio\jbr\bin\java.exe" set "JAVA_HOME=C:\Program Files\Android\Android Studio\jbr"& goto :java_ok
+          if exist "%LOCALAPPDATA%\Programs\Android Studio\jbr\bin\java.exe" set "JAVA_HOME=%LOCALAPPDATA%\Programs\Android Studio\jbr"& goto :java_ok
+          where java >nul 2>nul && goto :java_path_ok
+          echo [ERROR] Java 17 was not found.
+          echo Install Android Studio, then run this BAT again.
+          start "" "https://developer.android.com/studio"
+          pause
+          exit /b 1
+
+          :java_ok
+          set "PATH=%JAVA_HOME%\bin;%PATH%"
+          :java_path_ok
+          for /f "tokens=2 delims=\" %%v in ('java -version 2^>^&1 ^| findstr /i "version"') do set "JAVA_VERSION=%%v"
+          echo Java: %JAVA_VERSION%
+
+          rem ---- Find Android SDK ----
+          if defined ANDROID_SDK_ROOT if exist "%ANDROID_SDK_ROOT%\platforms" goto :sdk_ok
+          if defined ANDROID_HOME if exist "%ANDROID_HOME%\platforms" set "ANDROID_SDK_ROOT=%ANDROID_HOME%"& goto :sdk_ok
+          if exist "%LOCALAPPDATA%\Android\Sdk\platforms" set "ANDROID_SDK_ROOT=%LOCALAPPDATA%\Android\Sdk"& goto :sdk_ok
+          if exist "%USERPROFILE%\AppData\Local\Android\Sdk\platforms" set "ANDROID_SDK_ROOT=%USERPROFILE%\AppData\Local\Android\Sdk"& goto :sdk_ok
+          echo [ERROR] Android SDK was not found.
+          echo Open Android Studio once and install Android SDK, then run this BAT again.
+          pause
+          exit /b 1
+
+          :sdk_ok
+          set "ANDROID_HOME=%ANDROID_SDK_ROOT%"
+          echo Android SDK: %ANDROID_SDK_ROOT%
+
+          rem ---- Install Android 36 platform automatically if sdkmanager exists ----
+          if not exist "%ANDROID_SDK_ROOT%\platforms\android-36\android.jar" (
+            echo Android 36 platform is missing. Trying to install it...
+            set "SDKMANAGER=%ANDROID_SDK_ROOT%\cmdline-tools\latest\bin\sdkmanager.bat"
+            if not exist "%SDKMANAGER%" set "SDKMANAGER=%ANDROID_SDK_ROOT%\cmdline-tools\bin\sdkmanager.bat"
+            if exist "%SDKMANAGER%" (
+              call "%SDKMANAGER%" "platforms;android-36" "build-tools;36.0.0"
+            ) else (
+              echo [ERROR] Android SDK Platform 36 is missing and sdkmanager was not found.
+              echo In Android Studio: SDK Manager - install Android 16 / API 36.
+              pause
+              exit /b 1
+            )
+          )
+
+          rem ---- Restore the SAME release signing key used by installed MB Guard ----
+          if not exist "signing\mbguard15.p12" (
+            if not exist "signing\mbguard15.p12.b64" (
+              echo [ERROR] signing\mbguard15.p12.b64 is missing.
+              pause
+              exit /b 1
+            )
+            echo Restoring signing key...
+            powershell -NoProfile -ExecutionPolicy Bypass -Command "$b=[IO.File]::ReadAllText('signing\mbguard15.p12.b64').Trim(); [IO.File]::WriteAllBytes('signing\mbguard15.p12',[Convert]::FromBase64String($b))"
+            if errorlevel 1 (
+              echo [ERROR] Could not restore signing key.
+              pause
+              exit /b 1
+            )
+          )
+
+          echo.
+          echo Building RELEASE APK. First build needs Internet to download Gradle/dependencies.
+          echo Please wait...
+          echo.
+          call gradlew.bat --no-daemon clean :app:assembleRelease
+          if errorlevel 1 goto :build_failed
+
+          if not exist "app\build\outputs\apk\release\app-release.apk" goto :apk_missing
+          copy /y "app\build\outputs\apk\release\app-release.apk" "MB_Guard_Android15.apk" >nul
+
+          echo.
+          echo ============================================================
+          echo   BUILD SUCCESS
+          echo   APK: %CD%\MB_Guard_Android15.apk
+          echo ============================================================
+          echo.
+          explorer /select,"%CD%\MB_Guard_Android15.apk"
+          pause
+          exit /b 0
+
+          :apk_missing
+          echo [ERROR] Gradle finished but APK was not found.
+          pause
+          exit /b 1
+
+          :build_failed
+          echo.
+          echo [ERROR] BUILD FAILED. Read the messages above.
+          pause
+          exit /b 1
+          EOF
+
+          cat > "$PKG/HUONG_DAN.txt" <<'EOF'
+          MB GUARD ANDROID 15 - FULL SOURCE
+          =================================
+
+          DAY LA TOAN BO MA NGUON CUA UNG DUNG MB GUARD DUNG DE BAT/TAT ACCESSIBILITY.
+          Package: com.mrtien.mbbankguard15
+          Version snapshot: 1.5.4
+
+          CACH BUILD APK TREN WINDOWS
+          ---------------------------
+          1. Giai nen file ZIP ra mot thu muc ngan, vi du: C:\MB_Guard_Source
+          2. May tinh can co Android Studio / Android SDK.
+          3. Double-click BUILD_APK.bat.
+          4. Lan dau can Internet de tai Gradle va cac thu vien.
+          5. Khi thanh cong, file MB_Guard_Android15.apk se nam ngay canh BUILD_APK.bat.
+
+          BUILD_APK.bat tu dong:
+          - Tim Java cua Android Studio.
+          - Tim Android SDK.
+          - Cai Android API 36 neu sdkmanager co san.
+          - Khoi phuc khoa ky release hien tai.
+          - Build APK release.
+          - Copy APK ra thu muc goc.
+
+          DE NANG CAP SAU NAY
+          ------------------
+          Chi can gui lai NGUYEN FILE ZIP NAY cho ChatGPT va noi tinh nang muon sua/them.
+          File ZIP co app/src/main/java, AndroidManifest, resources, Gradle va script build,
+          nen co the tiep tuc sua ma nguon va build phien ban moi.
+
+          QUAN TRONG VE KHOA KY
+          --------------------
+          Thu muc signing co khoa ky dang Base64 de cac ban build sau cai de len ban hien tai.
+          Khong nen chia se file ZIP nay cong khai. Neu mat khoa ky, nguoi khac co the ky APK
+          cung danh tinh ung dung.
+          EOF
+
+          cat > "$PKG/PROJECT_INFO.txt" <<EOF
+          Project: MB Guard Android 15
+          Source repository snapshot: https://github.com/tienpy/MB_Guard_Android15
+          Git commit: $GITHUB_SHA
+          App module only: yes
+          Android applicationId: com.mrtien.mbbankguard15
+          Version: 1.5.4 (code 14)
+          Java: 17
+          compileSdk/targetSdk: 36
+          Gradle: 8.13
+          Android Gradle Plugin: 8.13.2
+          EOF
+
+          cat > "$PKG/.gitignore" <<'EOF'
+          .gradle/
+          .idea/
+          local.properties
+          **/build/
+          signing/*.p12
+          *.apk
+          EOF
+
+          chmod +x "$PKG/gradlew"
+          zip -r "$PKG.zip" "$PKG" >/dev/null
+          echo "Created $PKG.zip"
+
+      - name: Upload full source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: MB_Guard_Android15_FULL_SOURCE_v1.5.4
+          path: MB_Guard_Android15_FULL_SOURCE_v1.5.4.zip
+          if-no-files-found: error
+          retention-days: 90
