@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">Auto Skip &amp; Paste</string>
+    <string name="service_name">Auto Skip &amp; Paste</string>
+    <string name="service_description">Tự bấm nút Bỏ qua/Skip/Đóng quảng cáo và hiện nút DÁN khi nhấp đúp vào ô nhập.</string>
+</resources>
