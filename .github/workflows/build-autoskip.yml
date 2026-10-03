@@ -47,11 +47,11 @@ jobs:
         run: gradle --no-daemon :autoskip:assembleRelease
 
       - name: Prepare APK
-        run: cp autoskip/build/outputs/apk/release/autoskip-release.apk Auto_Skip_Paste_v1.1.0.apk
+        run: cp autoskip/build/outputs/apk/release/autoskip-release.apk Auto_Skip_Paste_v1.2.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Auto_Skip_Paste_v1.1.0
-          path: Auto_Skip_Paste_v1.1.0.apk
+          name: Auto_Skip_Paste_v1.2.0
+          path: Auto_Skip_Paste_v1.2.0.apk
           if-no-files-found: error
