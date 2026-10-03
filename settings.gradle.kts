@@ -17,6 +17,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "MBBankAccessibilityGuard"
 include(":app")
-
 include(":callrecorder")
 include(":shakeactions")
+include(":autoskip")
