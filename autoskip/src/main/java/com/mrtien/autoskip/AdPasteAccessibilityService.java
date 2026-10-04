@@ -1,7 +1,9 @@
 package com.mrtien.autoskip;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.AccessibilityServiceInfo;
 import android.accessibilityservice.GestureDescription;
+import android.accessibilityservice.TouchInteractionController;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.SharedPreferences;
@@ -10,14 +12,15 @@ import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.Rect;
 import android.graphics.drawable.GradientDrawable;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.text.TextUtils;
+import android.view.Display;
 import android.view.Gravity;
 import android.view.MotionEvent;
-import android.view.View;
 import android.view.WindowManager;
 import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
@@ -35,42 +38,35 @@ import java.util.Set;
 
 public class AdPasteAccessibilityService extends AccessibilityService {
 
-    private static final long SECOND_TAP_WINDOW_MS = 650L;
-    private static final long PASTE_BUTTON_TIMEOUT_MS = 4200L;
-    private static final long SCAN_INTERVAL_MS = 300L;
+    private static final long DOUBLE_TAP_MIN_MS = 70L;
+    private static final long DOUBLE_TAP_MAX_MS = 560L;
+    private static final long PASTE_BUTTON_TIMEOUT_MS = 4500L;
+    private static final long SCAN_INTERVAL_MS = 280L;
     private static final long AD_SCAN_BURST_MS = 22000L;
-    private static final long BLIND_AD_TAP_GAP_MS = 1500L;
-    private static final long TEXT_CHANGE_GUARD_MS = 320L;
 
     private static final Set<String> EXACT_SKIP_LABELS = new HashSet<>(Arrays.asList(
             "skip", "skip ad", "skip ads", "skip video", "skip advertisement",
             "skip this ad", "close ad", "close ads", "close advertisement",
             "dismiss ad", "dismiss advertisement", "bo qua", "bo qua quang cao",
             "dong quang cao", "dong qc", "tat quang cao", "bo qua qc",
-            "skip now", "close video"
+            "skip now", "close video", "continue to app", "back to app",
+            "return to app", "continue", "tiep tuc vao ung dung",
+            "quay lai ung dung", "tro lai ung dung"
     ));
 
     private static final String[] SKIP_PREFIXES = {
             "skip ad ", "skip in ", "skip video ", "skip advertisement ",
-            "bo qua sau ", "bo qua quang cao ", "dong quang cao ", "dong qc "
+            "bo qua sau ", "bo qua quang cao ", "dong quang cao ", "dong qc ",
+            "continue to app ", "back to app "
     };
 
     private static final String[] ID_HINTS = {
             "skip_ad", "skipad", "ad_skip", "adskip", "close_ad", "closead",
             "ad_close", "adclose", "dismiss_ad", "dismissad", "btn_skip_ad",
             "button_skip_ad", "reward_close", "interstitial_close", "ad_close_button",
-            "skip_button", "skipbutton", "rewarded_close", "close_interstitial"
+            "skip_button", "skipbutton", "rewarded_close", "close_interstitial",
+            "continue_to_app", "continue_to_content", "back_to_app"
     };
-
-    /* Deliberately excludes generic words such as "download" and "open app".
-       Those words appear in normal screens such as File Manager and caused v1.1
-       to tap unrelated UI. */
-    private static final Set<String> AD_CTA_LABELS = new HashSet<>(Arrays.asList(
-            "go to google play", "get it on google play", "install now",
-            "download now", "learn more", "play now", "watch now", "shop now",
-            "visit advertiser", "visit site", "get offer", "apply now",
-            "cai dat ngay", "tim hieu them"
-    ));
 
     private static final String[] BLOCKED_PACKAGE_PREFIXES = {
             "com.mrtien.autoskip",
@@ -89,7 +85,9 @@ public class AdPasteAccessibilityService extends AccessibilityService {
             "com.huawei.filemanager",
             "com.hihonor.filemanager",
             "com.huawei.android.launcher",
-            "com.hihonor.android.launcher"
+            "com.hihonor.android.launcher",
+            "com.huawei.systemmanager",
+            "com.hihonor.systemmanager"
     };
 
     private final Handler handler = new Handler(Looper.getMainLooper());
@@ -98,24 +96,24 @@ public class AdPasteAccessibilityService extends AccessibilityService {
     private String lastForegroundPackage = "";
     private long scanBurstUntil;
     private boolean scanScheduled;
-    private long lastBlindAdTapAt;
-    private int blindTapVariant;
 
     private AccessibilityNodeInfo focusedEditable;
     private String focusedEditableSignature = "";
-    private Rect focusedEditableBounds = new Rect();
-    private long lastTextChangedAt;
-
-    private View secondTapOverlay;
-    private final Runnable hideSecondTapOverlayRunnable = this::hideSecondTapOverlay;
+    private final Rect focusedEditableBounds = new Rect();
 
     private TextView pasteOverlay;
     private AccessibilityNodeInfo pasteTarget;
     private String pasteTargetSignature = "";
     private final Runnable hidePasteRunnable = this::hidePasteOverlay;
 
-    private long lastAccessibilityClickAt;
-    private String lastAccessibilityClickSignature = "";
+    private long lastTapDownAt;
+    private float lastTapDownX;
+    private float lastTapDownY;
+    private String lastTapDownSignature = "";
+
+    private TouchInteractionController touchController;
+    private TouchInteractionController.Callback touchCallback;
+    private boolean touchCaptureRequested;
 
     private final Runnable scanRunnable = new Runnable() {
         @Override
@@ -137,6 +135,105 @@ public class AdPasteAccessibilityService extends AccessibilityService {
     protected void onServiceConnected() {
         super.onServiceConnected();
         windowManager = (WindowManager) getSystemService(WINDOW_SERVICE);
+        setupTouchController();
+        startScanBurst(AD_SCAN_BURST_MS);
+    }
+
+    private void setupTouchController() {
+        if (Build.VERSION.SDK_INT < 33) return;
+        try {
+            touchController = getTouchInteractionController(Display.DEFAULT_DISPLAY);
+            touchCallback = new TouchInteractionController.Callback() {
+                @Override
+                public void onMotionEvent(MotionEvent event) {
+                    if (event == null || touchController == null) return;
+                    if (event.getActionMasked() == MotionEvent.ACTION_DOWN) {
+                        handleRawTouchDown(event.getRawX(), event.getRawY());
+                    }
+                    try {
+                        touchController.requestDelegating();
+                    } catch (Throwable ignored) {
+                    }
+                }
+
+                @Override
+                public void onStateChanged(int state) {
+                }
+            };
+            touchController.registerCallback(null, touchCallback);
+        } catch (Throwable ignored) {
+            touchController = null;
+            touchCallback = null;
+        }
+    }
+
+    private void setTouchCaptureRequested(boolean enabled) {
+        if (Build.VERSION.SDK_INT < 33) return;
+        if (touchCaptureRequested == enabled) return;
+        try {
+            AccessibilityServiceInfo info = getServiceInfo();
+            if (info == null) return;
+            if (enabled) {
+                info.flags |= AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE;
+            } else {
+                info.flags &= ~AccessibilityServiceInfo.FLAG_REQUEST_TOUCH_EXPLORATION_MODE;
+            }
+            setServiceInfo(info);
+            touchCaptureRequested = enabled;
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private void handleRawTouchDown(float x, float y) {
+        if (!isDoubleTapPasteEnabled()) return;
+
+        AccessibilityNodeInfo editable = findFocusedEditableInWindows();
+        if (!isEditableNode(editable)) {
+            resetTapSequence();
+            return;
+        }
+
+        String pkg = editable.getPackageName() == null
+                ? lastForegroundPackage
+                : editable.getPackageName().toString();
+        if (!isSafePackage(pkg)) {
+            resetTapSequence();
+            return;
+        }
+
+        rememberFocusedEditable(editable, pkg);
+        Rect b = new Rect(focusedEditableBounds);
+        if (!b.contains(Math.round(x), Math.round(y))) {
+            resetTapSequence();
+            return;
+        }
+
+        String signature = focusedEditableSignature;
+        long now = SystemClock.elapsedRealtime();
+        long delta = now - lastTapDownAt;
+        float dx = x - lastTapDownX;
+        float dy = y - lastTapDownY;
+        float maxDistance = dp(55);
+
+        if (signature.equals(lastTapDownSignature)
+                && delta >= DOUBLE_TAP_MIN_MS
+                && delta <= DOUBLE_TAP_MAX_MS
+                && (dx * dx + dy * dy) <= maxDistance * maxDistance) {
+            resetTapSequence();
+            handler.postDelayed(this::showPasteOverlayFromFocusedInput, 90L);
+        } else {
+            lastTapDownAt = now;
+            lastTapDownX = x;
+            lastTapDownY = y;
+            lastTapDownSignature = signature;
+        }
+    }
+
+    private void resetTapSequence() {
+        lastTapDownAt = 0L;
+        lastTapDownX = 0f;
+        lastTapDownY = 0f;
+        lastTapDownSignature = "";
     }
 
     @Override
@@ -152,18 +249,12 @@ public class AdPasteAccessibilityService extends AccessibilityService {
 
         int type = event.getEventType();
 
-        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-            hidePasteOverlay();
-            hideSecondTapOverlay();
-            clearFocusedEditable();
-        }
-
         if (isAutoSkipEnabled() && isSafePackage(packageName)) {
             if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED
                     || type == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
                 startScanBurst(AD_SCAN_BURST_MS);
             } else if (type == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED) {
-                startScanBurst(8000L);
+                startScanBurst(9000L);
             }
         }
 
@@ -171,51 +262,56 @@ public class AdPasteAccessibilityService extends AccessibilityService {
             return;
         }
 
-        if (type == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED) {
-            lastTextChangedAt = SystemClock.elapsedRealtime();
-            AccessibilityNodeInfo editable = resolveEditableForEvent(event);
-            if (editable != null) rememberFocusedEditable(editable, packageName, false);
-            return;
-        }
-
-        if (type == AccessibilityEvent.TYPE_VIEW_FOCUSED) {
-            AccessibilityNodeInfo editable = resolveEditableForEvent(event);
-            if (editable != null) rememberFocusedEditable(editable, packageName, false);
-            return;
-        }
-
-        if (type == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+        if (type == AccessibilityEvent.TYPE_VIEW_FOCUSED
+                || type == AccessibilityEvent.TYPE_VIEW_CLICKED
+                || type == AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED
+                || type == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
             AccessibilityNodeInfo editable = resolveEditableForEvent(event);
             if (editable != null) {
-                rememberFocusedEditable(editable, packageName, true);
-                handleAccessibilityClick(editable, packageName);
+                rememberFocusedEditable(editable, packageName);
             }
-            return;
         }
 
         if (type == AccessibilityEvent.TYPE_VIEW_TEXT_SELECTION_CHANGED) {
-            /* Typing also fires SELECTION_CHANGED after every character on Honor/MagicOS.
-               Never show DÁN from this event. We only use it to arm the SECOND tap when
-               it did not immediately follow a text change. */
-            long now = SystemClock.elapsedRealtime();
-            if (now - lastTextChangedAt < TEXT_CHANGE_GUARD_MS) return;
             AccessibilityNodeInfo editable = resolveEditableForEvent(event);
-            if (editable != null) rememberFocusedEditable(editable, packageName, true);
+            if (editable != null) {
+                int start = editable.getTextSelectionStart();
+                int end = editable.getTextSelectionEnd();
+                // Fallback for OEMs that do not expose raw double taps: a real word selection
+                // has a non-zero range, while normal typing keeps start == end.
+                if (start >= 0 && end >= 0 && start != end) {
+                    showPasteOverlay(editable, nodeSignature(editable, packageName));
+                }
+            }
+        }
+
+        if (type == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+            handler.postDelayed(() -> {
+                AccessibilityNodeInfo editable = findFocusedEditableInWindows();
+                if (editable == null) {
+                    clearFocusedEditable();
+                    setTouchCaptureRequested(false);
+                }
+            }, 350L);
         }
     }
 
     @Override
     public void onInterrupt() {
         hidePasteOverlay();
-        hideSecondTapOverlay();
     }
 
     @Override
     public void onDestroy() {
         handler.removeCallbacksAndMessages(null);
         hidePasteOverlay();
-        hideSecondTapOverlay();
         clearFocusedEditable();
+        if (Build.VERSION.SDK_INT >= 33 && touchController != null) {
+            try {
+                if (touchCallback != null) touchController.unregisterCallback(touchCallback);
+            } catch (Throwable ignored) {
+            }
+        }
         super.onDestroy();
     }
 
@@ -274,50 +370,31 @@ public class AdPasteAccessibilityService extends AccessibilityService {
         ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
         queue.add(root);
         int visited = 0;
-
-        AccessibilityNodeInfo strongCandidate = null;
         AccessibilityNodeInfo xCandidate = null;
-        boolean hasWebView = false;
-        boolean hasCta = false;
-        boolean hasAdMarker = false;
-        boolean hasCountdown = false;
 
-        while (!queue.isEmpty() && visited < 1400) {
+        while (!queue.isEmpty() && visited < 1500) {
             AccessibilityNodeInfo node = queue.removeFirst();
             visited++;
             if (node == null) continue;
 
-            if (node.isVisibleToUser()) {
+            if (node.isVisibleToUser() && node.isEnabled()) {
                 String text = normalize(node.getText());
                 String desc = normalize(node.getContentDescription());
                 String hint = normalize(node.getHintText());
                 String id = normalizeId(node.getViewIdResourceName());
-                String cls = node.getClassName() == null
-                        ? ""
-                        : node.getClassName().toString().toLowerCase(Locale.ROOT);
 
-                if (cls.contains("webview")) hasWebView = true;
-
-                if (strongCandidate == null
-                        && (isStrongSkipLabel(text)
+                if (isStrongSkipLabel(text)
                         || isStrongSkipLabel(desc)
                         || isStrongSkipLabel(hint)
-                        || hasStrongIdHint(id))) {
-                    strongCandidate = node;
+                        || hasStrongIdHint(id)) {
+                    if (performClickOrTap(node)) {
+                        incrementSkipCount();
+                        return true;
+                    }
                 }
 
                 if (xCandidate == null && isXLike(node, text, desc)) {
                     xCandidate = node;
-                }
-
-                if (!hasCta && (isAdCta(text) || isAdCta(desc) || isAdCta(hint))) {
-                    hasCta = true;
-                }
-                if (!hasAdMarker && (isAdMarker(text) || isAdMarker(desc) || isAdMarker(id))) {
-                    hasAdMarker = true;
-                }
-                if (!hasCountdown && (isCountdown(text) || isCountdown(desc))) {
-                    hasCountdown = true;
                 }
             }
 
@@ -327,35 +404,11 @@ public class AdPasteAccessibilityService extends AccessibilityService {
             }
         }
 
-        /* Explicit Skip/Close-Ad nodes are safe enough to click directly. */
-        if (strongCandidate != null && performClickOrTap(strongCandidate)) {
+        // No blind screen-coordinate taps. They caused File Manager/Home to open by mistake.
+        if (isCloseXEnabled() && xCandidate != null && performClickOrTap(xCandidate)) {
             incrementSkipCount();
             return true;
         }
-
-        /* A generic X is only touched if the same screen also contains strong ad evidence. */
-        boolean strongAdEvidence = hasAdMarker || hasCountdown || (hasWebView && hasCta);
-        if (isCloseXEnabled() && xCandidate != null && strongAdEvidence
-                && performClickOrTap(xCandidate)) {
-            incrementSkipCount();
-            return true;
-        }
-
-        /* Coordinate fallback is intentionally very conservative. v1.1 treated a normal
-           word like "Download" as an advertisement and tapped File Manager/Home UI.
-           Now we require WebView + an explicit ad marker + another independent signal. */
-        boolean safeForBlindTap = hasWebView && hasAdMarker && (hasCta || hasCountdown);
-        if (isCloseXEnabled() && safeForBlindTap) {
-            long now = SystemClock.elapsedRealtime();
-            if (now - lastBlindAdTapAt >= BLIND_AD_TAP_GAP_MS) {
-                lastBlindAdTapAt = now;
-                if (tapLikelyTopRightAdClose(root)) {
-                    incrementSkipCount();
-                    return true;
-                }
-            }
-        }
-
         return false;
     }
 
@@ -378,43 +431,6 @@ public class AdPasteAccessibilityService extends AccessibilityService {
         return false;
     }
 
-    private boolean isAdCta(String value) {
-        if (value.isEmpty()) return false;
-        if (AD_CTA_LABELS.contains(value)) return true;
-        return value.startsWith("go to google play")
-                || value.startsWith("install now")
-                || value.startsWith("download now")
-                || value.startsWith("learn more")
-                || value.startsWith("play now")
-                || value.startsWith("shop now");
-    }
-
-    private boolean isAdMarker(String value) {
-        if (value.isEmpty()) return false;
-        return "ad".equals(value)
-                || "ads".equals(value)
-                || "advertisement".equals(value)
-                || "sponsored".equals(value)
-                || "quang cao".equals(value)
-                || "qc".equals(value)
-                || value.contains("adchoices")
-                || value.contains("ad_container")
-                || value.contains("adcontainer")
-                || value.contains("native_ad")
-                || value.contains("ad_unit")
-                || value.contains("interstitial")
-                || value.contains("rewarded_ad")
-                || value.contains("rewardedad");
-    }
-
-    private boolean isCountdown(String value) {
-        if (value.isEmpty()) return false;
-        return value.matches("\\d{1,2}\\s*s")
-                || value.matches("\\d{1,2}\\s*sec")
-                || value.matches("\\d{1,2}\\s*seconds")
-                || value.matches("skip\\s*in\\s*\\d{1,2}.*");
-    }
-
     private boolean isXLike(AccessibilityNodeInfo node, String text, String desc) {
         String label = !text.isEmpty() ? text : desc;
         boolean xLabel = "x".equals(label)
@@ -432,10 +448,11 @@ public class AdPasteAccessibilityService extends AccessibilityService {
         int screenH = getResources().getDisplayMetrics().heightPixels;
         if (r.isEmpty() || screenW <= 0 || screenH <= 0) return false;
 
-        boolean nearTop = r.centerY() < screenH * 0.30f;
-        boolean nearSide = r.centerX() > screenW * 0.62f || r.centerX() < screenW * 0.38f;
-        boolean small = r.width() < screenW * 0.25f && r.height() < screenH * 0.14f;
-        return nearTop && nearSide && small;
+        boolean nearTop = r.centerY() < screenH * 0.38f;
+        boolean nearSide = r.centerX() > screenW * 0.56f || r.centerX() < screenW * 0.44f;
+        boolean reasonablySmall = r.width() < screenW * 0.35f
+                && r.height() < screenH * 0.22f;
+        return nearTop && nearSide && reasonablySmall;
     }
 
     private boolean performClickOrTap(AccessibilityNodeInfo node) {
@@ -443,7 +460,9 @@ public class AdPasteAccessibilityService extends AccessibilityService {
         for (int depth = 0; current != null && depth < 7; depth++) {
             if (current.isClickable() && current.isEnabled()) {
                 try {
-                    if (current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return true;
+                    if (current.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                        return true;
+                    }
                 } catch (Throwable ignored) {
                 }
             }
@@ -452,37 +471,15 @@ public class AdPasteAccessibilityService extends AccessibilityService {
 
         Rect r = new Rect();
         node.getBoundsInScreen(r);
-        return !r.isEmpty() && dispatchTap(r.centerX(), r.centerY());
-    }
-
-    private boolean tapLikelyTopRightAdClose(AccessibilityNodeInfo root) {
-        Rect r = new Rect();
-        root.getBoundsInScreen(r);
-        if (r.isEmpty()) {
-            r.set(0, 0,
-                    getResources().getDisplayMetrics().widthPixels,
-                    getResources().getDisplayMetrics().heightPixels);
-        }
-
-        float[][] points = new float[][] {
-                {0.925f, 0.090f},
-                {0.955f, 0.090f},
-                {0.925f, 0.125f}
-        };
-        float[] p = points[blindTapVariant % points.length];
-        blindTapVariant++;
-
-        return dispatchTap(
-                r.left + r.width() * p[0],
-                r.top + r.height() * p[1]
-        );
+        if (r.isEmpty()) return false;
+        return dispatchTap(r.centerX(), r.centerY());
     }
 
     private boolean dispatchTap(float x, float y) {
         Path path = new Path();
         path.moveTo(x, y);
         GestureDescription.StrokeDescription stroke =
-                new GestureDescription.StrokeDescription(path, 0L, 50L);
+                new GestureDescription.StrokeDescription(path, 0L, 55L);
         GestureDescription gesture = new GestureDescription.Builder()
                 .addStroke(stroke)
                 .build();
@@ -495,15 +492,34 @@ public class AdPasteAccessibilityService extends AccessibilityService {
 
     private void incrementSkipCount() {
         SharedPreferences p = prefs();
-        p.edit().putLong(
-                MainActivity.KEY_SKIP_COUNT,
-                p.getLong(MainActivity.KEY_SKIP_COUNT, 0L) + 1L
-        ).apply();
+        long value = p.getLong(MainActivity.KEY_SKIP_COUNT, 0L);
+        p.edit().putLong(MainActivity.KEY_SKIP_COUNT, value + 1L).apply();
     }
 
     private AccessibilityNodeInfo resolveEditableForEvent(AccessibilityEvent event) {
         AccessibilityNodeInfo source = event.getSource();
         if (isEditableNode(source)) return source;
+
+        AccessibilityNodeInfo focused = findFocusedEditableInWindows();
+        if (isEditableNode(focused)) return focused;
+        return null;
+    }
+
+    private AccessibilityNodeInfo findFocusedEditableInWindows() {
+        try {
+            List<AccessibilityWindowInfo> windows = getWindows();
+            if (windows != null) {
+                for (int i = windows.size() - 1; i >= 0; i--) {
+                    AccessibilityWindowInfo window = windows.get(i);
+                    if (window == null) continue;
+                    AccessibilityNodeInfo root = window.getRoot();
+                    if (root == null) continue;
+                    AccessibilityNodeInfo focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
+                    if (isEditableNode(focused)) return focused;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
 
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
@@ -513,136 +529,20 @@ public class AdPasteAccessibilityService extends AccessibilityService {
             }
         } catch (Throwable ignored) {
         }
-        return findFocusedEditableInWindows();
-    }
-
-    private AccessibilityNodeInfo findFocusedEditableInWindows() {
-        try {
-            List<AccessibilityWindowInfo> windows = getWindows();
-            if (windows == null) return null;
-            for (int i = windows.size() - 1; i >= 0; i--) {
-                AccessibilityWindowInfo window = windows.get(i);
-                if (window == null) continue;
-                AccessibilityNodeInfo root = window.getRoot();
-                if (root == null) continue;
-                AccessibilityNodeInfo focused = root.findFocus(AccessibilityNodeInfo.FOCUS_INPUT);
-                if (isEditableNode(focused)) return focused;
-            }
-        } catch (Throwable ignored) {
-        }
         return null;
     }
 
-    private void rememberFocusedEditable(
-            AccessibilityNodeInfo node,
-            String packageName,
-            boolean armSecondTap
-    ) {
+    private void rememberFocusedEditable(AccessibilityNodeInfo node, String packageName) {
         if (!isEditableNode(node) || node.isPassword()) return;
 
         Rect bounds = new Rect();
         node.getBoundsInScreen(bounds);
         if (bounds.isEmpty()) return;
 
-        String signature = nodeSignature(node, packageName);
-        if (!signature.equals(focusedEditableSignature)) {
-            clearFocusedEditable();
-            try {
-                focusedEditable = AccessibilityNodeInfo.obtain(node);
-            } catch (Throwable ignored) {
-                focusedEditable = node;
-            }
-            focusedEditableSignature = signature;
-        }
+        focusedEditable = node;
+        focusedEditableSignature = nodeSignature(node, packageName);
         focusedEditableBounds.set(bounds);
-
-        if (armSecondTap) armSecondTapOverlay();
-    }
-
-    private void handleAccessibilityClick(AccessibilityNodeInfo editable, String packageName) {
-        String signature = nodeSignature(editable, packageName);
-        long now = SystemClock.elapsedRealtime();
-        long delta = now - lastAccessibilityClickAt;
-
-        if (signature.equals(lastAccessibilityClickSignature)
-                && delta > 40L && delta <= SECOND_TAP_WINDOW_MS) {
-            hideSecondTapOverlay();
-            showPasteOverlay(editable, signature);
-            lastAccessibilityClickAt = 0L;
-            lastAccessibilityClickSignature = "";
-        } else {
-            lastAccessibilityClickAt = now;
-            lastAccessibilityClickSignature = signature;
-            armSecondTapOverlay();
-        }
-    }
-
-    private void armSecondTapOverlay() {
-        if (windowManager == null || pasteOverlay != null) return;
-        if (focusedEditable == null || focusedEditableBounds.isEmpty()) return;
-
-        hideSecondTapOverlay();
-
-        int screenW = getResources().getDisplayMetrics().widthPixels;
-        int screenH = getResources().getDisplayMetrics().heightPixels;
-        Rect b = new Rect(focusedEditableBounds);
-        if (!b.intersect(0, 0, screenW, screenH)) return;
-        if (b.width() < dp(45) || b.height() < dp(22)) return;
-
-        View capture = new View(this);
-        capture.setBackgroundColor(Color.TRANSPARENT);
-        capture.setOnTouchListener((v, event) -> {
-            if (event == null) return true;
-            if (event.getActionMasked() == MotionEvent.ACTION_UP) {
-                hideSecondTapOverlay();
-                showPasteOverlayFromFocusedInput();
-            } else if (event.getActionMasked() == MotionEvent.ACTION_CANCEL) {
-                hideSecondTapOverlay();
-            }
-            return true;
-        });
-        secondTapOverlay = capture;
-
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                b.width(),
-                b.height(),
-                WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
-                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
-                        | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
-                PixelFormat.TRANSLUCENT
-        );
-        lp.gravity = Gravity.TOP | Gravity.START;
-        lp.x = b.left;
-        lp.y = b.top;
-
-        try {
-            windowManager.addView(capture, lp);
-            handler.postDelayed(hideSecondTapOverlayRunnable, SECOND_TAP_WINDOW_MS);
-        } catch (Throwable ignored) {
-            secondTapOverlay = null;
-        }
-    }
-
-    private void hideSecondTapOverlay() {
-        handler.removeCallbacks(hideSecondTapOverlayRunnable);
-        if (secondTapOverlay != null && windowManager != null) {
-            try {
-                windowManager.removeView(secondTapOverlay);
-            } catch (Throwable ignored) {
-            }
-        }
-        secondTapOverlay = null;
-    }
-
-    private void showPasteOverlayFromFocusedInput() {
-        AccessibilityNodeInfo target = findFocusedEditableInWindows();
-        if (target == null) target = focusedEditable;
-        if (target == null) return;
-        String pkg = target.getPackageName() == null
-                ? lastForegroundPackage
-                : target.getPackageName().toString();
-        showPasteOverlay(target, nodeSignature(target, pkg));
+        setTouchCaptureRequested(true);
     }
 
     private boolean isEditableNode(AccessibilityNodeInfo node) {
@@ -678,17 +578,21 @@ public class AdPasteAccessibilityService extends AccessibilityService {
         return packageName + "|" + (id == null ? "" : id) + "|" + cls + "|" + r.flattenToString();
     }
 
+    private void showPasteOverlayFromFocusedInput() {
+        AccessibilityNodeInfo target = findFocusedEditableInWindows();
+        if (target == null) target = focusedEditable;
+        if (target == null) return;
+        String pkg = target.getPackageName() == null
+                ? lastForegroundPackage
+                : target.getPackageName().toString();
+        showPasteOverlay(target, nodeSignature(target, pkg));
+    }
+
     private void showPasteOverlay(AccessibilityNodeInfo target, String signature) {
         if (windowManager == null || target == null) return;
-
-        hideSecondTapOverlay();
         hidePasteOverlay();
 
-        try {
-            pasteTarget = AccessibilityNodeInfo.obtain(target);
-        } catch (Throwable ignored) {
-            pasteTarget = target;
-        }
+        pasteTarget = target;
         pasteTargetSignature = signature;
 
         Rect bounds = new Rect();
@@ -705,7 +609,7 @@ public class AdPasteAccessibilityService extends AccessibilityService {
         GradientDrawable background = new GradientDrawable();
         background.setColor(Color.rgb(11, 143, 106));
         background.setCornerRadius(dp(12));
-        background.setStroke(dp(1), Color.argb(100, 255, 255, 255));
+        background.setStroke(dp(1), Color.argb(110, 255, 255, 255));
         button.setBackground(background);
         button.setElevation(dp(10));
         button.setOnClickListener(v -> pasteIntoTarget());
@@ -734,8 +638,9 @@ public class AdPasteAccessibilityService extends AccessibilityService {
 
         try {
             windowManager.addView(button, lp);
+            handler.removeCallbacks(hidePasteRunnable);
             handler.postDelayed(hidePasteRunnable, PASTE_BUTTON_TIMEOUT_MS);
-        } catch (Throwable ignored) {
+        } catch (Throwable t) {
             pasteOverlay = null;
         }
     }
@@ -747,23 +652,10 @@ public class AdPasteAccessibilityService extends AccessibilityService {
         boolean success = false;
 
         if (target != null) {
-            try { target.refresh(); } catch (Throwable ignored) {}
             try {
                 target.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
                 success = target.performAction(AccessibilityNodeInfo.ACTION_PASTE);
             } catch (Throwable ignored) {
-            }
-        }
-
-        if (!success) {
-            AccessibilityNodeInfo reacquired = findEditableBySignature(pasteTargetSignature);
-            if (reacquired != null) {
-                target = reacquired;
-                try {
-                    reacquired.performAction(AccessibilityNodeInfo.ACTION_FOCUS);
-                    success = reacquired.performAction(AccessibilityNodeInfo.ACTION_PASTE);
-                } catch (Throwable ignored) {
-                }
             }
         }
 
@@ -773,14 +665,11 @@ public class AdPasteAccessibilityService extends AccessibilityService {
 
         if (success) {
             SharedPreferences p = prefs();
-            p.edit().putLong(
-                    MainActivity.KEY_PASTE_COUNT,
-                    p.getLong(MainActivity.KEY_PASTE_COUNT, 0L) + 1L
-            ).apply();
+            long count = p.getLong(MainActivity.KEY_PASTE_COUNT, 0L);
+            p.edit().putLong(MainActivity.KEY_PASTE_COUNT, count + 1L).apply();
         } else {
             Toast.makeText(this, "Ô này không cho Android thực hiện Dán tự động.", Toast.LENGTH_SHORT).show();
         }
-
         hidePasteOverlay();
     }
 
@@ -800,15 +689,14 @@ public class AdPasteAccessibilityService extends AccessibilityService {
             if (start < 0 || start > oldText.length()) start = oldText.length();
             if (end < 0 || end > oldText.length()) end = start;
             if (end < start) {
-                int temp = start;
+                int tmp = start;
                 start = end;
-                end = temp;
+                end = tmp;
             }
 
             String newText = oldText.substring(0, start)
                     + pasted
                     + oldText.substring(end);
-
             Bundle args = new Bundle();
             args.putCharSequence(
                     AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE,
@@ -820,53 +708,12 @@ public class AdPasteAccessibilityService extends AccessibilityService {
         }
     }
 
-    private AccessibilityNodeInfo findEditableBySignature(String signature) {
-        if (TextUtils.isEmpty(signature)) return null;
-
-        try {
-            List<AccessibilityWindowInfo> windows = getWindows();
-            if (windows != null) {
-                for (int i = windows.size() - 1; i >= 0; i--) {
-                    AccessibilityWindowInfo window = windows.get(i);
-                    if (window == null) continue;
-                    AccessibilityNodeInfo found = findEditableBySignature(window.getRoot(), signature);
-                    if (found != null) return found;
-                }
-            }
-        } catch (Throwable ignored) {
-        }
-        return findEditableBySignature(getRootInActiveWindow(), signature);
-    }
-
-    private AccessibilityNodeInfo findEditableBySignature(
-            AccessibilityNodeInfo root,
-            String signature
-    ) {
-        if (root == null) return null;
-        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
-        queue.add(root);
-        int visited = 0;
-
-        while (!queue.isEmpty() && visited < 1000) {
-            AccessibilityNodeInfo node = queue.removeFirst();
-            visited++;
-            if (node == null) continue;
-
-            String pkg = node.getPackageName() == null ? "" : node.getPackageName().toString();
-            if (isEditableNode(node) && signature.equals(nodeSignature(node, pkg))) return node;
-
-            for (int i = 0; i < node.getChildCount(); i++) {
-                AccessibilityNodeInfo child = node.getChild(i);
-                if (child != null) queue.addLast(child);
-            }
-        }
-        return null;
-    }
-
     private void hidePasteOverlay() {
-        handler.removeCallbacks(hidePasteRunnable);
         if (pasteOverlay != null && windowManager != null) {
-            try { windowManager.removeView(pasteOverlay); } catch (Throwable ignored) {}
+            try {
+                windowManager.removeView(pasteOverlay);
+            } catch (Throwable ignored) {
+            }
         }
         pasteOverlay = null;
         pasteTarget = null;
@@ -877,8 +724,7 @@ public class AdPasteAccessibilityService extends AccessibilityService {
         focusedEditable = null;
         focusedEditableSignature = "";
         focusedEditableBounds.setEmpty();
-        lastAccessibilityClickAt = 0L;
-        lastAccessibilityClickSignature = "";
+        resetTapSequence();
     }
 
     private boolean isSafePackage(String packageName) {
