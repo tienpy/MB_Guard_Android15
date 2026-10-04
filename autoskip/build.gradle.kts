@@ -10,8 +10,8 @@ android {
         applicationId = "com.mrtien.autoskip"
         minSdk = 26
         targetSdk = 36
-        versionCode = 11
-        versionName = "2.2.4"
+        versionCode = 12
+        versionName = "2.2.5"
     }
 
     signingConfigs {
