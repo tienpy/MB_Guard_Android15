@@ -1,0 +1,164 @@
+name: Package AdBlock Paste Full Source
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/package-autoskip-source.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.13'
+
+      - name: Prepare standalone full source
+        shell: bash
+        run: |
+          set -e
+          PKG=AdBlock_Paste_FULL_SOURCE_v2.2.5
+          rm -rf "$PKG"
+          mkdir -p "$PKG/app"
+          cp -R autoskip/src "$PKG/app/"
+          cp autoskip/build.gradle.kts "$PKG/app/build.gradle.kts"
+          cp gradle.properties "$PKG/gradle.properties"
+
+          cat > "$PKG/build.gradle.kts" <<'EOF'
+          plugins {
+              id("com.android.application") version "8.13.2" apply false
+          }
+          EOF
+
+          cat > "$PKG/settings.gradle.kts" <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven { url = uri("https://jitpack.io") }
+              }
+          }
+
+          rootProject.name = "AdBlockPaste"
+          include(":app")
+          EOF
+
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('AdBlock_Paste_FULL_SOURCE_v2.2.5/app/build.gradle.kts')
+          s=p.read_text(encoding='utf-8')
+          start=s.find('    signingConfigs {')
+          if start!=-1:
+              depth=0; end=None
+              for i in range(start,len(s)):
+                  if s[i]=='{': depth+=1
+                  elif s[i]=='}':
+                      depth-=1
+                      if depth==0:
+                          end=i+1
+                          break
+              if end: s=s[:start]+s[end:]
+          import re
+          s=re.sub(r'\n\s*signingConfig\s*=\s*signingConfigs\.getByName\("releaseKey"\)', '', s)
+          p.write_text(s,encoding='utf-8')
+          PY
+
+          cat > "$PKG/BUILD_APK.bat" <<'EOF'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          echo ============================================================
+          echo  AdBlock ^& Paste v2.2.5 - BUILD APK
+          echo ============================================================
+          echo.
+          where java >nul 2>nul
+          if errorlevel 1 (
+            echo [LOI] Khong tim thay Java 17.
+            echo Hay cai Android Studio hoac JDK 17 roi chay lai.
+            pause
+            exit /b 1
+          )
+          if not defined ANDROID_SDK_ROOT if not defined ANDROID_HOME (
+            if exist "%LOCALAPPDATA%\Android\Sdk" set "ANDROID_SDK_ROOT=%LOCALAPPDATA%\Android\Sdk"
+          )
+          if not defined ANDROID_SDK_ROOT if not defined ANDROID_HOME (
+            echo [LOI] Khong tim thay Android SDK.
+            echo Hay cai Android Studio + Android SDK 36.
+            pause
+            exit /b 1
+          )
+          call gradlew.bat --no-daemon :app:assembleDebug
+          if errorlevel 1 (
+            echo.
+            echo [LOI] Build that bai.
+            pause
+            exit /b 1
+          )
+          copy /Y "app\build\outputs\apk\debug\app-debug.apk" "AdBlock_Paste_v2.2.5.apk" >nul
+          echo.
+          echo [OK] Da tao: %CD%\AdBlock_Paste_v2.2.5.apk
+          start "" explorer.exe /select,"%CD%\AdBlock_Paste_v2.2.5.apk"
+          pause
+          EOF
+
+          cat > "$PKG/README_BUILD.txt" <<'EOF'
+          AdBlock & Paste v2.2.5 - FULL SOURCE
+          ====================================
+
+          Day la toan bo ma nguon cua ung dung AdBlock & Paste v2.2.5 hien tai.
+
+          Thanh phan chinh:
+          - DNS/VPN chan quang cao
+          - Accessibility Paste Shortcut
+          - Nhap dup -> DAN
+          - Lich su Clipboard
+          - Ho tro Shizuku cho lich su clipboard
+          - BootReceiver tu khoi dong lai DNS/VPN khi duoc phep
+
+          Build tren Windows:
+          1. Cai Android Studio hoac JDK 17 + Android SDK 36.
+          2. Giai nen ZIP.
+          3. Bam BUILD_APK.bat.
+          4. File APK duoc tao ngay thu muc goc: AdBlock_Paste_v2.2.5.apk
+
+          Luu y ve chu ky APK:
+          - Goi ma nguon nay KHONG chua khoa ky rieng.
+          - APK tao tu BUILD_APK.bat dung debug signing cua Gradle, nen co the khong cai de len ban APK da ky truoc do.
+          - Khi can nang cap tiep, chi can gui lai file ZIP nay cho ChatGPT.
+          EOF
+
+          cd "$PKG"
+          gradle wrapper --gradle-version 8.13 --distribution-type bin
+          cd ..
+          zip -r "${PKG}.zip" "$PKG" >/dev/null
+
+      - name: Upload full source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdBlock_Paste_FULL_SOURCE_v2.2.5
+          path: AdBlock_Paste_FULL_SOURCE_v2.2.5.zip
+          if-no-files-found: error
