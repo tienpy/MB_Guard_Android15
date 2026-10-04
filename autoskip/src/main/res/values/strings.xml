@@ -1,5 +1,5 @@
 <resources>
     <string name="app_name">AdBlock &amp; Paste</string>
     <string name="service_name">Paste Shortcut</string>
-    <string name="service_description">Hiện nút DÁN sau khi nhấp đúp vào ô nhập. Dịch vụ không chặn cảm ứng và không tự bấm quảng cáo.</string>
+    <string name="service_description">Nhấp đúp vào ô đang có con trỏ để hiện DÁN và lịch sử sao chép. Chỉ theo dõi vùng ô nhập, không dùng Touch Exploration và không tự bấm quảng cáo.</string>
 </resources>
