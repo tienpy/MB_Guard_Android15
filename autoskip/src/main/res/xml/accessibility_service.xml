@@ -6,5 +6,6 @@
     android:notificationTimeout="30"
     android:canRetrieveWindowContent="true"
     android:canPerformGestures="true"
+    android:canRequestTouchExplorationMode="true"
     android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows|flagIncludeNotImportantViews|flagRequestEnhancedWebAccessibility"
     android:settingsActivity="com.mrtien.autoskip.MainActivity" />
