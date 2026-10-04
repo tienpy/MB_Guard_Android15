@@ -29,10 +29,6 @@ public class MainActivity extends Activity {
     public static final String KEY_PASTE_COUNT = "paste_count";
     public static final String KEY_DNS_BLOCK_WANTED = "dns_block_wanted";
 
-    // Kept only so upgrades from old versions automatically disable the old feature.
-    private static final String LEGACY_AUTO_SKIP = "auto_skip";
-    private static final String LEGACY_CLOSE_X = "close_x";
-
     private static final int REQ_VPN = 501;
 
     private TextView statusView;
@@ -42,13 +38,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-
-        // v2.1 permanently removes Accessibility auto-clicking of ads.
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putBoolean(LEGACY_AUTO_SKIP, false)
-                .putBoolean(LEGACY_CLOSE_X, false)
+                .putBoolean("auto_skip", false)
+                .putBoolean("close_x", false)
                 .apply();
-
         setContentView(buildUi());
         loadPrefs();
         requestNotificationPermissionIfNeeded();
@@ -57,6 +50,9 @@ public class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (ShizukuClipboardBridge.hasPermission()) {
+            ShizukuClipboardBridge.start(this);
+        }
         refreshStatus();
     }
 
@@ -73,18 +69,14 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView intro = text(
-                "Bản 2.1 giữ phần chặn quảng cáo bằng DNS/VPN đang hoạt động tốt và bỏ hoàn toàn cơ chế Accessibility tự tìm/bấm quảng cáo. "
-                        + "Phần DÁN được làm lại để không chặn cảm ứng, không khóa bàn phím và không làm màn hình nhảy lung tung.",
-                16,
-                false
-        );
+                "Bản 2.2 giữ nguyên chặn quảng cáo bằng DNS/VPN. Phần DÁN được làm lại để hoạt động trong mọi ô nhập mà Trợ năng nhìn thấy: chỉ lớp cảm ứng của chính ô đang có con trỏ được theo dõi, không đụng vào bàn phím. Nhấp đúp sẽ hiện DÁN + nút lịch sử.",
+                16, false);
         intro.setPadding(0, dp(8), 0, dp(14));
         root.addView(intro);
 
         statusView = card(root, "TRẠNG THÁI");
 
         addHeading(root, "1. CHẶN QUẢNG CÁO TỪ MẠNG");
-
         Button startDns = primary("BẬT CHẶN QUẢNG CÁO MẠNG");
         startDns.setOnClickListener(v -> requestVpnAndStart());
         root.addView(startDns);
@@ -94,18 +86,13 @@ public class MainActivity extends Activity {
         root.addView(stopDns);
 
         TextView dnsNote = text(
-                "Giữ nguyên cơ chế DNS/VPN của bản trước. Quảng cáo bị chặn trước khi tải nên không cần Accessibility theo dõi hoặc tự bấm nút quảng cáo nữa. "
-                        + "Android chỉ cho một VPN hoạt động tại một thời điểm.",
-                14,
-                false
-        );
+                "Phần tự theo dõi/tự bấm quảng cáo đã bị loại bỏ hoàn toàn. Chỉ còn lớp DNS/VPN vì phần này trên máy anh đang hoạt động tốt.",
+                14, false);
         dnsNote.setTextColor(Color.DKGRAY);
-        dnsNote.setPadding(dp(2), dp(4), dp(2), dp(10));
         root.addView(dnsNote);
 
-        addHeading(root, "2. NHẤP ĐÚP → DÁN");
-
-        Button accessibility = primary("BẬT TRỢ NĂNG CHỈ CHO NÚT DÁN");
+        addHeading(root, "2. NHẤP ĐÚP → DÁN + LỊCH SỬ");
+        Button accessibility = primary("BẬT TRỢ NĂNG PASTE SHORTCUT");
         accessibility.setOnClickListener(v -> {
             try {
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
@@ -116,45 +103,77 @@ public class MainActivity extends Activity {
         root.addView(accessibility);
 
         doubleTapPaste = new CheckBox(this);
-        doubleTapPaste.setText("Nhấp đúp vào ô nhập để hiện nút DÁN");
+        doubleTapPaste.setText("Nhấp đúp vào ô có con trỏ để hiện DÁN + lịch sử");
         doubleTapPaste.setTextSize(16);
         root.addView(doubleTapPaste);
 
         TextView pasteNote = text(
-                "Cơ chế mới KHÔNG bắt trực tiếp cảm ứng và KHÔNG dùng Touch Exploration. Bàn phím, cuộn màn hình và mọi nút khác hoạt động bình thường. "
-                        + "Khi Android xác nhận nhấp đúp trong cùng ô nhập hoặc nhấp đúp chọn một từ, nút DÁN nhỏ sẽ hiện phía trên ô trong vài giây, giống menu chỉnh sửa trên iPhone.",
-                14,
-                false
-        );
+                "DÁN sẽ dán ngay nội dung vừa copy. Nút ▤ bên cạnh mở các nội dung đã copy trước đó. Bản này không dùng Touch Exploration nên bàn phím không bị khóa.",
+                14, false);
         pasteNote.setTextColor(Color.DKGRAY);
-        pasteNote.setPadding(dp(2), 0, dp(2), dp(10));
         root.addView(pasteNote);
+
+        addHeading(root, "3. LỊCH SỬ CLIPBOARD TOÀN HỆ THỐNG");
+        Button shizuku = primary("CẤP QUYỀN LỊCH SỬ TOÀN HỆ THỐNG (SHIZUKU)");
+        shizuku.setOnClickListener(v -> requestShizuku());
+        root.addView(shizuku);
+
+        TextView shizukuNote = text(
+                "Android 15 không cho ứng dụng thường đọc clipboard của app khác trong nền. Nếu anh muốn lịch sử tự nhớ mọi lần copy ở Zalo/Facebook/trình duyệt…, cần Shizuku chạy bằng Gỡ lỗi không dây. Không cần root. Nếu không dùng Shizuku, nút DÁN mới nhất vẫn hoạt động; lịch sử chỉ lưu được những mục Android cho phép đọc.",
+                14, false);
+        shizukuNote.setTextColor(Color.rgb(110, 75, 20));
+        root.addView(shizukuNote);
 
         Button save = primary("LƯU CÀI ĐẶT");
         save.setOnClickListener(v -> savePrefs());
         root.addView(save);
 
-        statsView = card(root, "THỐNG KÊ");
+        statsView = card(root, "THỐNG KÊ / LỊCH SỬ");
 
-        Button reset = button("XÓA THỐNG KÊ DÁN");
-        reset.setOnClickListener(v -> {
-            getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                    .putLong(KEY_PASTE_COUNT, 0L)
-                    .apply();
+        Button clearHistory = button("XÓA TOÀN BỘ LỊCH SỬ COPY");
+        clearHistory.setOnClickListener(v -> {
+            ClipboardHistoryStore.clear(this);
+            refreshStatus();
+            Toast.makeText(this, "Đã xóa lịch sử.", Toast.LENGTH_SHORT).show();
+        });
+        root.addView(clearHistory);
+
+        Button resetCount = button("XÓA SỐ LẦN DÁN");
+        resetCount.setOnClickListener(v -> {
+            getSharedPreferences(PREFS, MODE_PRIVATE).edit().putLong(KEY_PASTE_COUNT, 0L).apply();
             refreshStatus();
         });
-        root.addView(reset);
+        root.addView(resetCount);
 
-        TextView note = text(
-                "Sau khi cài bản 2.1, hãy TẮT rồi BẬT lại dịch vụ Trợ năng một lần. Việc này rất quan trọng để Android bỏ cấu hình Touch Exploration của bản 2.0.1.",
-                14,
-                true
-        );
-        note.setTextColor(Color.rgb(150, 80, 15));
-        note.setPadding(0, dp(16), 0, 0);
-        root.addView(note);
+        TextView important = text(
+                "Sau khi cài đè bản 2.2, hãy vào Trợ năng → Paste Shortcut → TẮT rồi BẬT lại một lần để Android nạp cấu hình canPerformGestures mới.",
+                14, true);
+        important.setTextColor(Color.rgb(150, 80, 15));
+        important.setPadding(0, dp(16), 0, 0);
+        root.addView(important);
 
         return scroll;
+    }
+
+    private void requestShizuku() {
+        if (!ShizukuClipboardBridge.isAvailable()) {
+            Intent launch = getPackageManager().getLaunchIntentForPackage("moe.shizuku.privileged.api");
+            if (launch != null) {
+                startActivity(launch);
+                Toast.makeText(this, "Hãy khởi động Shizuku bằng Gỡ lỗi không dây rồi quay lại app.", Toast.LENGTH_LONG).show();
+            } else {
+                Toast.makeText(this, "Máy chưa cài Shizuku. Lịch sử chữ vẫn hoạt động ở mức Android cho phép; muốn lịch sử toàn hệ thống cần cài Shizuku.", Toast.LENGTH_LONG).show();
+            }
+            return;
+        }
+        if (ShizukuClipboardBridge.hasPermission()) {
+            ShizukuClipboardBridge.start(this);
+            Toast.makeText(this, "Lịch sử toàn hệ thống đã sẵn sàng.", Toast.LENGTH_SHORT).show();
+            refreshStatus();
+        } else {
+            ShizukuClipboardBridge.requestPermission();
+            Toast.makeText(this, "Chọn Cho phép trong cửa sổ Shizuku.", Toast.LENGTH_LONG).show();
+        }
     }
 
     private void requestVpnAndStart() {
@@ -177,14 +196,10 @@ public class MainActivity extends Activity {
     }
 
     private void startDnsBlocker() {
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putBoolean(KEY_DNS_BLOCK_WANTED, true)
-                .apply();
-        Intent service = new Intent(this, DnsAdBlockVpnService.class)
-                .setAction(DnsAdBlockVpnService.ACTION_START);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_DNS_BLOCK_WANTED, true).apply();
+        Intent service = new Intent(this, DnsAdBlockVpnService.class).setAction(DnsAdBlockVpnService.ACTION_START);
         try {
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
-            else startService(service);
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
             Toast.makeText(this, "Đã bật chặn quảng cáo mạng.", Toast.LENGTH_SHORT).show();
         } catch (Throwable t) {
             Toast.makeText(this, "Không khởi động được chặn quảng cáo mạng.", Toast.LENGTH_LONG).show();
@@ -193,16 +208,11 @@ public class MainActivity extends Activity {
     }
 
     private void stopDnsBlocker() {
-        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putBoolean(KEY_DNS_BLOCK_WANTED, false)
-                .apply();
-        Intent service = new Intent(this, DnsAdBlockVpnService.class)
-                .setAction(DnsAdBlockVpnService.ACTION_STOP);
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit().putBoolean(KEY_DNS_BLOCK_WANTED, false).apply();
+        Intent service = new Intent(this, DnsAdBlockVpnService.class).setAction(DnsAdBlockVpnService.ACTION_STOP);
         try {
-            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
-            else startService(service);
-        } catch (Throwable ignored) {
-        }
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service); else startService(service);
+        } catch (Throwable ignored) {}
         refreshStatus();
     }
 
@@ -221,47 +231,42 @@ public class MainActivity extends Activity {
 
     private void savePrefs() {
         getSharedPreferences(PREFS, MODE_PRIVATE).edit()
-                .putBoolean(KEY_DOUBLE_TAP_PASTE, doubleTapPaste.isChecked())
-                .apply();
+                .putBoolean(KEY_DOUBLE_TAP_PASTE, doubleTapPaste.isChecked()).apply();
         Toast.makeText(this, "Đã lưu cài đặt.", Toast.LENGTH_SHORT).show();
         refreshStatus();
     }
 
     private void refreshStatus() {
-        boolean accessibilityEnabled = isServiceEnabled();
-        SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
-        boolean paste = p.getBoolean(KEY_DOUBLE_TAP_PASTE, true);
+        boolean accessibility = isServiceEnabled();
         boolean dns = DnsAdBlockVpnService.isRunning();
+        boolean paste = getSharedPreferences(PREFS, MODE_PRIVATE)
+                .getBoolean(KEY_DOUBLE_TAP_PASTE, true);
+        boolean shizuku = ShizukuClipboardBridge.hasPermission();
+        int historyCount = ClipboardHistoryStore.load(this).size();
 
         statusView.setText(
                 "Chặn quảng cáo mạng: " + (dns ? "ĐANG BẬT" : "ĐANG TẮT")
-                        + "\nTrợ năng nút DÁN: " + (accessibilityEnabled ? "ĐANG BẬT" : "ĐANG TẮT")
+                        + "\nTrợ năng Paste Shortcut: " + (accessibility ? "ĐANG BẬT" : "ĐANG TẮT")
                         + "\nNhấp đúp → DÁN: " + (paste ? "BẬT" : "TẮT")
+                        + "\nLịch sử toàn hệ thống (Shizuku): " + (shizuku ? "ĐÃ CẤP" : "CHƯA CẤP")
                         + "\nTự theo dõi/bấm quảng cáo: ĐÃ LOẠI BỎ"
         );
-        statusView.setTextColor(
-                dns && accessibilityEnabled
-                        ? Color.rgb(20, 120, 65)
-                        : Color.rgb(170, 90, 35)
-        );
+        statusView.setTextColor(dns && accessibility ? Color.rgb(20, 120, 65) : Color.rgb(170, 90, 35));
 
         if (statsView != null) {
-            statsView.setText("Đã dán bằng nút DÁN: " + p.getLong(KEY_PASTE_COUNT, 0L) + " lần");
+            long pasteCount = getSharedPreferences(PREFS, MODE_PRIVATE).getLong(KEY_PASTE_COUNT, 0L);
+            statsView.setText("Đã dán: " + pasteCount + " lần\nLịch sử đang lưu: " + historyCount + " mục");
         }
     }
 
     private boolean isServiceEnabled() {
         AccessibilityManager manager = (AccessibilityManager) getSystemService(Context.ACCESSIBILITY_SERVICE);
         if (manager == null) return false;
-        List<AccessibilityServiceInfo> enabled = manager.getEnabledAccessibilityServiceList(
-                AccessibilityServiceInfo.FEEDBACK_ALL_MASK
-        );
+        List<AccessibilityServiceInfo> enabled = manager.getEnabledAccessibilityServiceList(AccessibilityServiceInfo.FEEDBACK_ALL_MASK);
         for (AccessibilityServiceInfo info : enabled) {
             if (info.getResolveInfo() != null
                     && info.getResolveInfo().serviceInfo != null
-                    && getPackageName().equals(info.getResolveInfo().serviceInfo.packageName)) {
-                return true;
-            }
+                    && getPackageName().equals(info.getResolveInfo().serviceInfo.packageName)) return true;
         }
         return false;
     }
@@ -288,9 +293,7 @@ public class MainActivity extends Activity {
         b.setAllCaps(false);
         b.setGravity(Gravity.CENTER);
         LinearLayout.LayoutParams p = new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                dp(54)
-        );
+                LinearLayout.LayoutParams.MATCH_PARENT, dp(54));
         p.topMargin = dp(7);
         b.setLayoutParams(p);
         return b;
