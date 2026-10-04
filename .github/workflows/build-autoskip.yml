@@ -7,6 +7,8 @@ on:
     paths:
       - 'autoskip/**'
       - 'settings.gradle.kts'
+      - 'build.gradle.kts'
+      - 'gradle.properties'
       - '.github/workflows/build-autoskip.yml'
 
 permissions:
@@ -54,4 +56,102 @@ jobs:
         with:
           name: AdBlock_Paste_v2.2.5
           path: AdBlock_Paste_v2.2.5.apk
+          if-no-files-found: error
+
+      - name: Package full source
+        shell: bash
+        run: |
+          set -e
+          ROOT="AdBlock_Paste_v2.2.5_FULL_SOURCE"
+          rm -rf "$ROOT"
+          mkdir -p "$ROOT/.github/workflows"
+          cp -R autoskip "$ROOT/autoskip"
+          rm -rf "$ROOT/autoskip/build"
+          cp build.gradle.kts "$ROOT/build.gradle.kts"
+          cp gradle.properties "$ROOT/gradle.properties"
+          cp .github/workflows/build-autoskip.yml "$ROOT/.github/workflows/build-autoskip.yml"
+
+          cat > "$ROOT/settings.gradle.kts" <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+                  maven { url = uri("https://jitpack.io") }
+              }
+          }
+
+          rootProject.name = "AdBlock_Paste_v2.2.5"
+          include(":autoskip")
+          EOF
+
+          cat > "$ROOT/README_SOURCE.txt" <<'EOF'
+          AD BLOCK & PASTE v2.2.5 - FULL SOURCE
+          =====================================
+
+          Đây là toàn bộ mã nguồn của module AdBlock & Paste v2.2.5:
+          - DNS/VPN chặn quảng cáo
+          - Accessibility nhấp đúp -> DÁN
+          - Lịch sử clipboard
+          - Hỗ trợ Shizuku cho lịch sử clipboard
+
+          Thư mục chính:
+          autoskip/src/main/java/com/mrtien/autoskip/
+          autoskip/src/main/res/
+          autoskip/src/main/AndroidManifest.xml
+
+          Lưu ý bảo mật:
+          Khóa ký riêng của ứng dụng KHÔNG được đóng gói trong file source ZIP này.
+          Khi build bản release, hãy dùng khóa ký riêng của bạn hoặc khóa gốc được lưu riêng.
+
+          Phiên bản nguồn: 2.2.5
+          Package: com.mrtien.autoskip
+          Android target: API 36
+          Java: 17
+          EOF
+
+          cat > "$ROOT/BUILD_DEBUG.bat" <<'EOF'
+          @echo off
+          setlocal
+          cd /d "%~dp0"
+          echo ==============================================
+          echo  BUILD AD BLOCK & PASTE v2.2.5 - DEBUG APK
+          echo ==============================================
+          echo.
+          where gradle >nul 2>nul
+          if errorlevel 1 (
+            echo Khong tim thay Gradle trong PATH.
+            echo Hay cai Android Studio hoac Gradle 8.13, sau do chay lai.
+            pause
+            exit /b 1
+          )
+          gradle --no-daemon :autoskip:assembleDebug
+          if errorlevel 1 (
+            echo.
+            echo BUILD THAT BAI.
+            pause
+            exit /b 1
+          )
+          echo.
+          echo APK duoc tao tai:
+          echo autoskip\build\outputs\apk\debug\autoskip-debug.apk
+          explorer autoskip\build\outputs\apk\debug
+          pause
+          EOF
+
+          zip -r AdBlock_Paste_v2.2.5_FULL_SOURCE.zip "$ROOT" >/dev/null
+
+      - name: Upload full source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: AdBlock_Paste_v2.2.5_FULL_SOURCE
+          path: AdBlock_Paste_v2.2.5_FULL_SOURCE.zip
           if-no-files-found: error
