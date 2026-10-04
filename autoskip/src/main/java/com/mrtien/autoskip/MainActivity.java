@@ -1,11 +1,15 @@
 package com.mrtien.autoskip;
 
+import android.Manifest;
 import android.accessibilityservice.AccessibilityServiceInfo;
 import android.app.Activity;
 import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
+import android.net.VpnService;
+import android.os.Build;
 import android.os.Bundle;
 import android.provider.Settings;
 import android.view.Gravity;
@@ -26,6 +30,9 @@ public class MainActivity extends Activity {
     public static final String KEY_DOUBLE_TAP_PASTE = "double_tap_paste";
     public static final String KEY_SKIP_COUNT = "skip_count";
     public static final String KEY_PASTE_COUNT = "paste_count";
+    public static final String KEY_DNS_BLOCK_WANTED = "dns_block_wanted";
+
+    private static final int REQ_VPN = 501;
 
     private TextView statusView;
     private TextView statsView;
@@ -38,6 +45,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(buildUi());
         loadPrefs();
+        requestNotificationPermissionIfNeeded();
     }
 
     @Override
@@ -59,8 +67,9 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView intro = text(
-                "Tự động bấm Bỏ qua / Skip / Đóng quảng cáo, kể cả quảng cáo nối tiếp nhiều lớp. "
-                        + "Ngoài ra, nhấp đúp vào ô đang nhập sẽ hiện nút DÁN ngay cạnh ô đó.",
+                "Bản 2.0 dùng 2 lớp chống quảng cáo: chặn ngay từ mạng bằng DNS/VPN, "
+                        + "sau đó Accessibility chỉ xử lý những nút Bỏ qua/X còn sót lại. "
+                        + "Nhấp đúp trong ô nhập sẽ hiện nút DÁN.",
                 16,
                 false
         );
@@ -68,6 +77,29 @@ public class MainActivity extends Activity {
         root.addView(intro);
 
         statusView = card(root, "TRẠNG THÁI");
+
+        addHeading(root, "1. CHẶN QUẢNG CÁO TỪ MẠNG");
+
+        Button startDns = primary("BẬT CHẶN QUẢNG CÁO MẠNG");
+        startDns.setOnClickListener(v -> requestVpnAndStart());
+        root.addView(startDns);
+
+        Button stopDns = button("TẮT CHẶN QUẢNG CÁO MẠNG");
+        stopDns.setOnClickListener(v -> stopDnsBlocker());
+        root.addView(stopDns);
+
+        TextView dnsNote = text(
+                "Đây là lớp mạnh nhất: quảng cáo từ các tên miền quảng cáo bị chặn trước khi tải nên nhiều app sẽ mở thẳng vào nội dung. "
+                        + "Android sẽ hỏi cho phép VPN một lần. VPN này chỉ chuyển tiếp DNS tới AdGuard DNS; không chuyển toàn bộ dữ liệu của anh. "
+                        + "Không thể chạy cùng lúc với một VPN khác.",
+                14,
+                false
+        );
+        dnsNote.setTextColor(Color.DKGRAY);
+        dnsNote.setPadding(dp(2), dp(4), dp(2), dp(10));
+        root.addView(dnsNote);
+
+        addHeading(root, "2. TRỢ NĂNG XỬ LÝ QUẢNG CÁO CÒN SÓT + DÁN");
 
         Button accessibility = primary("BẬT TRỢ NĂNG CHO AUTO SKIP & PASTE");
         accessibility.setOnClickListener(v -> {
@@ -79,21 +111,19 @@ public class MainActivity extends Activity {
         });
         root.addView(accessibility);
 
-        addHeading(root, "TỰ ĐỘNG BỎ QUA QUẢNG CÁO");
-
         autoSkip = new CheckBox(this);
-        autoSkip.setText("Tự bấm Bỏ qua / Skip / Đóng quảng cáo");
+        autoSkip.setText("Tự bấm Bỏ qua / Skip / Continue to app");
         autoSkip.setTextSize(16);
         root.addView(autoSkip);
 
         closeX = new CheckBox(this);
-        closeX.setText("Tự bấm nút X / × nhỏ ở góc quảng cáo");
+        closeX.setText("Tự bấm nút X / × khi Accessibility nhìn thấy nút thật");
         closeX.setTextSize(16);
         root.addView(closeX);
 
         TextView adNote = text(
-                "Sau khi bấm bỏ qua một quảng cáo, ứng dụng tiếp tục quét thêm vài giây để xử lý quảng cáo lớp 2, lớp 3. "
-                        + "Không tự thao tác trong Cài đặt Android, System UI, trình cài APK và bàn phím.",
+                "Bản này KHÔNG còn chạm mù vào góc màn hình nên không tự mở File Manager/Home nữa. "
+                        + "Nếu quảng cáo có nút thật, app sẽ bấm; nếu quảng cáo bị chặn từ DNS thì nó không tải ngay từ đầu.",
                 14,
                 false
         );
@@ -101,16 +131,16 @@ public class MainActivity extends Activity {
         adNote.setPadding(dp(2), 0, dp(2), dp(8));
         root.addView(adNote);
 
-        addHeading(root, "NHẤP ĐÚP → DÁN");
+        addHeading(root, "3. NHẤP ĐÚP → DÁN");
 
         doubleTapPaste = new CheckBox(this);
-        doubleTapPaste.setText("Nhấp đúp vào ô nhập để hiện nút DÁN");
+        doubleTapPaste.setText("Nhấp đúp vào ô đang nhập để hiện DÁN");
         doubleTapPaste.setTextSize(16);
         root.addView(doubleTapPaste);
 
         TextView pasteNote = text(
-                "Cách dùng: chạm 2 lần liên tiếp vào ô đang có con trỏ nhấp nháy. Nút DÁN sẽ hiện cạnh ô. "
-                        + "Bấm DÁN để dán nội dung Clipboard mà không cần nhấn giữ.",
+                "Bản 2.0 bắt trực tiếp 2 lần chạm trên Android 15 nhưng vẫn chuyển cú chạm xuống ứng dụng, nên gõ bàn phím bình thường sẽ không làm hiện DÁN. "
+                        + "Nếu app không gửi được sự kiện chạm, khi anh nhấp đúp chọn một từ thì DÁN cũng sẽ hiện.",
                 14,
                 false
         );
@@ -135,8 +165,8 @@ public class MainActivity extends Activity {
         root.addView(reset);
 
         TextView limit = text(
-                "Lưu ý: một số quảng cáo video/WebView tự vẽ toàn bộ giao diện và không cung cấp nút cho Accessibility. "
-                        + "Những quảng cáo đó Android không cho ứng dụng này nhìn thấy nút để tự bấm. Các quảng cáo có nút Skip/Đóng/X thông thường sẽ xử lý được.",
+                "Không có phương án không-root nào chặn được 100% mọi quảng cáo. DNS/VPN chặn được phần lớn quảng cáo tải từ tên miền riêng; "
+                        + "quảng cáo nhúng chung máy chủ với nội dung, quảng cáo đã cache sẵn hoặc app tự dùng DNS mã hóa có thể còn. Accessibility là lớp dự phòng cho các trường hợp đó.",
                 13,
                 false
         );
@@ -145,6 +175,68 @@ public class MainActivity extends Activity {
         root.addView(limit);
 
         return scroll;
+    }
+
+    private void requestVpnAndStart() {
+        try {
+            Intent prepare = VpnService.prepare(this);
+            if (prepare != null) {
+                startActivityForResult(prepare, REQ_VPN);
+            } else {
+                startDnsBlocker();
+            }
+        } catch (Throwable t) {
+            Toast.makeText(this, "Không mở được quyền VPN.", Toast.LENGTH_LONG).show();
+        }
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_VPN) {
+            if (resultCode == RESULT_OK) {
+                startDnsBlocker();
+            } else {
+                Toast.makeText(this, "Anh chưa cho phép VPN nên chưa thể chặn quảng cáo từ mạng.", Toast.LENGTH_LONG).show();
+            }
+        }
+    }
+
+    private void startDnsBlocker() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(KEY_DNS_BLOCK_WANTED, true)
+                .apply();
+        Intent service = new Intent(this, DnsAdBlockVpnService.class)
+                .setAction(DnsAdBlockVpnService.ACTION_START);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
+            else startService(service);
+            Toast.makeText(this, "Đã bật chặn quảng cáo từ mạng.", Toast.LENGTH_SHORT).show();
+        } catch (Throwable t) {
+            Toast.makeText(this, "Không khởi động được chặn quảng cáo mạng.", Toast.LENGTH_LONG).show();
+        }
+        refreshStatus();
+    }
+
+    private void stopDnsBlocker() {
+        getSharedPreferences(PREFS, MODE_PRIVATE).edit()
+                .putBoolean(KEY_DNS_BLOCK_WANTED, false)
+                .apply();
+        Intent service = new Intent(this, DnsAdBlockVpnService.class)
+                .setAction(DnsAdBlockVpnService.ACTION_STOP);
+        try {
+            if (Build.VERSION.SDK_INT >= 26) startForegroundService(service);
+            else startService(service);
+        } catch (Throwable ignored) {
+        }
+        refreshStatus();
+    }
+
+    private void requestNotificationPermissionIfNeeded() {
+        if (Build.VERSION.SDK_INT >= 33
+                && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 502);
+        }
     }
 
     private void loadPrefs() {
@@ -166,21 +258,27 @@ public class MainActivity extends Activity {
     }
 
     private void refreshStatus() {
-        boolean enabled = isServiceEnabled();
+        boolean accessibilityEnabled = isServiceEnabled();
         SharedPreferences p = getSharedPreferences(PREFS, MODE_PRIVATE);
         boolean skip = p.getBoolean(KEY_AUTO_SKIP, true);
         boolean paste = p.getBoolean(KEY_DOUBLE_TAP_PASTE, true);
+        boolean dns = DnsAdBlockVpnService.isRunning();
 
         statusView.setText(
-                "Trợ năng Auto Skip & Paste: " + (enabled ? "ĐANG BẬT" : "ĐANG TẮT")
-                        + "\nTự bỏ qua quảng cáo: " + (skip ? "BẬT" : "TẮT")
+                "Chặn quảng cáo mạng: " + (dns ? "ĐANG BẬT" : "ĐANG TẮT")
+                        + "\nTrợ năng Auto Skip & Paste: " + (accessibilityEnabled ? "ĐANG BẬT" : "ĐANG TẮT")
+                        + "\nTự bỏ qua quảng cáo còn sót: " + (skip ? "BẬT" : "TẮT")
                         + "\nNhấp đúp → DÁN: " + (paste ? "BẬT" : "TẮT")
         );
-        statusView.setTextColor(enabled ? Color.rgb(20, 120, 65) : Color.rgb(180, 55, 45));
+        statusView.setTextColor(
+                dns && accessibilityEnabled
+                        ? Color.rgb(20, 120, 65)
+                        : Color.rgb(170, 90, 35)
+        );
 
         if (statsView != null) {
             statsView.setText(
-                    "Đã tự bấm quảng cáo: " + p.getLong(KEY_SKIP_COUNT, 0L)
+                    "Đã tự bấm quảng cáo còn sót: " + p.getLong(KEY_SKIP_COUNT, 0L)
                             + " lần\nĐã dán bằng nút DÁN: " + p.getLong(KEY_PASTE_COUNT, 0L) + " lần"
             );
         }
