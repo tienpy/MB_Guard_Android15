@@ -47,11 +47,11 @@ jobs:
         run: gradle --no-daemon :autoskip:assembleRelease
 
       - name: Prepare APK
-        run: cp autoskip/build/outputs/apk/release/autoskip-release.apk AdBlock_Paste_v2.2.2.apk
+        run: cp autoskip/build/outputs/apk/release/autoskip-release.apk AdBlock_Paste_v2.2.3.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: AdBlock_Paste_v2.2.2
-          path: AdBlock_Paste_v2.2.2.apk
+          name: AdBlock_Paste_v2.2.3
+          path: AdBlock_Paste_v2.2.3.apk
           if-no-files-found: error
