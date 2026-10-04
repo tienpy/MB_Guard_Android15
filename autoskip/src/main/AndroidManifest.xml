@@ -24,7 +24,7 @@
         </activity>
 
         <service
-            android:name=".AdPasteAccessibilityService"
+            android:name=".PassivePasteAccessibilityService"
             android:exported="true"
             android:label="@string/service_name"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
